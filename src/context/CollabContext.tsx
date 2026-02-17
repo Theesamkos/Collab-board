@@ -67,7 +67,7 @@ export function CollabProvider({
     channelRef.current = channel;
 
     // ── Presence: online users ────────────────────────────────────
-    channel.on('presence', { event: 'sync' }, () => {
+    const syncUsers = () => {
       const state = channel.presenceState<{ userName: string }>();
       const users: OnlineUser[] = Object.entries(state).map(([uid, presences]) => ({
         userId: uid,
@@ -75,7 +75,11 @@ export function CollabProvider({
         color: colorForUser(uid),
       }));
       setOnlineUsers(users);
-    });
+    };
+
+    channel.on('presence', { event: 'sync' }, syncUsers);
+    channel.on('presence', { event: 'join' }, syncUsers);
+    channel.on('presence', { event: 'leave' }, syncUsers);
 
     // ── Cursors: receive broadcasts ───────────────────────────────
     channel.on(
