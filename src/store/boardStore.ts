@@ -11,6 +11,7 @@ export interface BoardObject {
   text?: string;
   color?: string;
   rotation?: number;
+  points?: number[]; // freehand path points [x0,y0,x1,y1,...]
 }
 
 export type ActiveTool = 'select' | 'pan' | 'draw';

@@ -158,10 +158,12 @@ export function Board() {
     const initializeBoard = async () => {
       if (!session?.user?.id) return;
 
+      // All users share the same board — load the oldest one regardless of owner.
+      // This enables real-time collaboration and presence to work across users.
       let { data: boards, error } = await supabase
         .from('boards')
         .select('id, objects')
-        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: true })
         .limit(1);
 
       let newBoardId: string;
@@ -170,7 +172,7 @@ export function Board() {
       if (error || !boards || boards.length === 0) {
         const { data, error: createError } = await supabase
           .from('boards')
-          .insert([{ user_id: session.user.id, title: 'My Board', objects: [] }])
+          .insert([{ user_id: session.user.id, title: 'Shared Board', objects: [] }])
           .select('id, objects')
           .single();
 

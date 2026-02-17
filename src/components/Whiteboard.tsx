@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import { Stage, Layer, Rect, Circle, Line, Text, Group } from 'react-konva';
 import Konva from 'konva';
 import { useBoardStore } from '../store/boardStore';
@@ -11,12 +11,15 @@ export function Whiteboard() {
   const {
     objects, panX, panY, zoom,
     setPan, setZoom,
-    updateObject, selectObject, clearSelection,
+    addObject, updateObject, selectObject, clearSelection,
     activeTool, deleteSelectedObjects, selectedObjectIds,
   } = useBoardStore();
   const [stageSize, setStageSize] = useState({ width: window.innerWidth, height: window.innerHeight });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [livePoints, setLivePoints] = useState<number[]>([]);
+  const drawPointsRef = useRef<number[]>([]);
 
   // Resize listener
   useEffect(() => {
@@ -122,6 +125,47 @@ export function Whiteboard() {
     };
   };
 
+  // ── Freehand drawing handlers ──────────────────────────────────
+  const handleDrawMouseDown = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (activeTool !== 'draw') return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    const pos = stage.getRelativePointerPosition();
+    if (!pos) return;
+    drawPointsRef.current = [pos.x, pos.y];
+    setLivePoints([pos.x, pos.y]);
+    setIsDrawing(true);
+  }, [activeTool]);
+
+  const handleDrawMouseMove = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (!isDrawing || activeTool !== 'draw') return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    const pos = stage.getRelativePointerPosition();
+    if (!pos) return;
+    drawPointsRef.current = [...drawPointsRef.current, pos.x, pos.y];
+    setLivePoints([...drawPointsRef.current]);
+  }, [isDrawing, activeTool]);
+
+  const handleDrawMouseUp = useCallback(() => {
+    if (!isDrawing) return;
+    setIsDrawing(false);
+    const pts = drawPointsRef.current;
+    drawPointsRef.current = [];
+    setLivePoints([]);
+    if (pts.length < 4) return; // need at least 2 points
+    addObject({
+      id: crypto.randomUUID(),
+      type: 'line',
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      points: pts,
+      color: '#1a1a1a',
+    });
+  }, [isDrawing, addObject]);
+
   const editingObj = editingId ? objects.find((o) => o.id === editingId) : null;
 
   // Objects are draggable only in select mode; stage drags only in pan mode
@@ -216,9 +260,12 @@ export function Whiteboard() {
         return (
           <Line
             key={key}
-            points={[obj.x, obj.y, obj.x + obj.width, obj.y + obj.height]}
+            points={obj.points || [obj.x, obj.y, obj.x + obj.width, obj.y + obj.height]}
             stroke={obj.color || '#1a1a1a'}
             strokeWidth={2}
+            lineCap="round"
+            lineJoin="round"
+            tension={0.3}
             onClick={(e) => {
               e.cancelBubble = true;
               selectObject(obj.id);
@@ -247,11 +294,25 @@ export function Whiteboard() {
         scaleY={zoom}
         onWheel={handleWheel}
         onDragEnd={stageDraggable ? handleDragEnd : undefined}
-        onClick={clearSelection}
+        onClick={activeTool !== 'draw' ? clearSelection : undefined}
         draggable={stageDraggable}
+        onMouseDown={handleDrawMouseDown}
+        onMouseMove={handleDrawMouseMove}
+        onMouseUp={handleDrawMouseUp}
       >
         <Layer>
           {objects.map((obj) => renderObject(obj))}
+          {isDrawing && livePoints.length >= 4 && (
+            <Line
+              points={livePoints}
+              stroke="#1a1a1a"
+              strokeWidth={2}
+              lineCap="round"
+              lineJoin="round"
+              tension={0.3}
+              listening={false}
+            />
+          )}
         </Layer>
       </Stage>
 
