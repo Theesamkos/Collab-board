@@ -126,7 +126,7 @@ export function Whiteboard() {
   };
 
   // ── Freehand drawing handlers ──────────────────────────────────
-  const handleDrawMouseDown = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
+  const handleDrawMouseDown = useCallback((_e: Konva.KonvaEventObject<MouseEvent>) => {
     if (activeTool !== 'draw') return;
     const stage = stageRef.current;
     if (!stage) return;
@@ -137,7 +137,7 @@ export function Whiteboard() {
     setIsDrawing(true);
   }, [activeTool]);
 
-  const handleDrawMouseMove = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
+  const handleDrawMouseMove = useCallback((_e: Konva.KonvaEventObject<MouseEvent>) => {
     if (!isDrawing || activeTool !== 'draw') return;
     const stage = stageRef.current;
     if (!stage) return;
