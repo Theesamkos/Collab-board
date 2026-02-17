@@ -6,27 +6,18 @@ type SyncStatus = 'connecting' | 'connected' | 'disconnected';
 
 /**
  * Subscribes to real-time Supabase changes for the given board.
- *
- * Conflict strategy — last-write-wins:
- *   Local mutations debounce a save (600ms). Remote updates via the Realtime
- *   subscription call `setObjects`, which does NOT trigger a re-save, so there
- *   is no feedback loop. Any momentary stale echo from our own save is
- *   overwritten within 600ms by the next pending debounce write.
+ * Requires Realtime enabled for the 'boards' table in Supabase Dashboard
+ * → Database → Replication.
  */
 export function useBoardSync(boardId: string | null) {
   const setObjects = useBoardStore((s) => s.setObjects);
   const [status, setStatus] = useState<SyncStatus>('disconnected');
 
   useEffect(() => {
-    if (!boardId) {
-      setStatus('disconnected');
-      return;
-    }
-
-    setStatus('connecting');
+    if (!boardId) return;
 
     const channel = supabase
-      .channel(`board-realtime:${boardId}`)
+      .channel(`board-sync:${boardId}`)
       .on(
         'postgres_changes',
         {
@@ -37,7 +28,7 @@ export function useBoardSync(boardId: string | null) {
         },
         (payload) => {
           if (payload.new && 'objects' in payload.new) {
-            setObjects(payload.new.objects ?? []);
+            setObjects((payload.new as { objects: any[] }).objects ?? []);
           }
         }
       )

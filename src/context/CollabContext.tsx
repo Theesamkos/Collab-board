@@ -1,0 +1,142 @@
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import type { RealtimeChannel } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
+import { useAuth } from './AuthContext';
+import { colorForUser } from '../lib/cursorColors';
+
+export interface OnlineUser {
+  userId: string;
+  userName: string;
+  color: string;
+}
+
+export interface RemoteCursor {
+  userId: string;
+  userName: string;
+  x: number;
+  y: number;
+  color: string;
+}
+
+interface CollabContextType {
+  onlineUsers: OnlineUser[];
+  remoteCursors: RemoteCursor[];
+  broadcastCursor: (x: number, y: number) => void;
+}
+
+const CollabContext = createContext<CollabContextType>({
+  onlineUsers: [],
+  remoteCursors: [],
+  broadcastCursor: () => {},
+});
+
+function getDisplayName(session: ReturnType<typeof useAuth>['session']): string {
+  return (
+    (session?.user?.user_metadata?.['full_name'] as string | undefined) ||
+    (session?.user?.user_metadata?.['name'] as string | undefined) ||
+    session?.user?.email?.split('@')[0] ||
+    'User'
+  );
+}
+
+export function CollabProvider({
+  boardId,
+  children,
+}: {
+  boardId: string;
+  children: React.ReactNode;
+}) {
+  const { session } = useAuth();
+  const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
+  const [remoteCursors, setRemoteCursors] = useState<RemoteCursor[]>([]);
+  const channelRef = useRef<RealtimeChannel | null>(null);
+  const cursorTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  const userId = session?.user?.id ?? '';
+  const userName = getDisplayName(session);
+
+  useEffect(() => {
+    if (!boardId || !userId) return;
+
+    const channel = supabase.channel(`collab:${boardId}`, {
+      config: {
+        presence: { key: userId },
+        broadcast: { self: false, ack: false },
+      },
+    });
+    channelRef.current = channel;
+
+    // ── Presence: online users ────────────────────────────────────
+    channel.on('presence', { event: 'sync' }, () => {
+      const state = channel.presenceState<{ userName: string }>();
+      const users: OnlineUser[] = Object.entries(state).map(([uid, presences]) => ({
+        userId: uid,
+        userName: (presences as Array<{ userName: string }>)[0]?.userName ?? 'User',
+        color: colorForUser(uid),
+      }));
+      setOnlineUsers(users);
+    });
+
+    // ── Cursors: receive broadcasts ───────────────────────────────
+    channel.on(
+      'broadcast',
+      { event: 'cursor' },
+      ({ payload }: { payload: { userId: string; userName: string; x: number; y: number } }) => {
+        const { userId: rid, userName: rName, x, y } = payload;
+        setRemoteCursors((prev) => [
+          ...prev.filter((c) => c.userId !== rid),
+          { userId: rid, userName: rName, x, y, color: colorForUser(rid) },
+        ]);
+        // Auto-remove cursor after 5s of inactivity
+        const existing = cursorTimers.current.get(rid);
+        if (existing) clearTimeout(existing);
+        cursorTimers.current.set(
+          rid,
+          setTimeout(() => {
+            setRemoteCursors((prev) => prev.filter((c) => c.userId !== rid));
+            cursorTimers.current.delete(rid);
+          }, 5000)
+        );
+      }
+    );
+
+    channel.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        await channel.track({ userName });
+      }
+    });
+
+    const onVisibility = () => {
+      if (document.hidden) {
+        channel.untrack();
+      } else {
+        channel.track({ userName });
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      cursorTimers.current.forEach(clearTimeout);
+      cursorTimers.current.clear();
+      channel.unsubscribe();
+      channelRef.current = null;
+    };
+  }, [boardId, userId, userName]);
+
+  const broadcastCursor = (x: number, y: number) => {
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'cursor',
+      payload: { userId, userName, x, y },
+    });
+  };
+
+  return (
+    <CollabContext.Provider value={{ onlineUsers, remoteCursors, broadcastCursor }}>
+      {children}
+    </CollabContext.Provider>
+  );
+}
+
+export const useCollab = () => useContext(CollabContext);

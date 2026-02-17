@@ -8,13 +8,12 @@ import { Whiteboard } from '../components/Whiteboard';
 import { Toolbar } from '../components/Toolbar';
 import { CursorTracker } from '../components/CursorTracker';
 import { RemoteCursors } from '../components/RemoteCursors';
-import { usePresence } from '../hooks/usePresence';
-import { colorForUser } from '../lib/cursorColors';
+import { CollabProvider, useCollab } from '../context/CollabContext';
 
 // ── Inline presence dropdown ──────────────────────────────────────
 function OnlineDropdown() {
   const { session } = useAuth();
-  const users = usePresence();
+  const { onlineUsers: users } = useCollab();
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -103,7 +102,7 @@ function OnlineDropdown() {
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
             {users.map((user) => {
-              const color = colorForUser(user.userId);
+              const color = user.color;
               const isYou = user.userId === currentUserId;
               return (
                 <div key={user.userId} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -212,6 +211,7 @@ export function Board() {
   }
 
   return (
+    <CollabProvider boardId={boardId!}>
     <div className="h-screen flex flex-col" style={{ backgroundColor: '#ffffff' }}>
       <CursorTracker />
       <RemoteCursors />
@@ -321,5 +321,6 @@ export function Board() {
       {/* ── Toolbar (fixed at bottom) ───────────────────────── */}
       <Toolbar />
     </div>
+    </CollabProvider>
   );
 }
