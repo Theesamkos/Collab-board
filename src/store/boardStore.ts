@@ -13,6 +13,8 @@ export interface BoardObject {
   rotation?: number;
 }
 
+export type ActiveTool = 'select' | 'pan' | 'draw';
+
 interface BoardState {
   boardId: string | null;
   objects: BoardObject[];
@@ -22,6 +24,7 @@ interface BoardState {
   zoom: number;
   isSyncing: boolean;
   lastSynced: Date | null;
+  activeTool: ActiveTool;
 
   // Actions
   setBoardId: (id: string) => void;
@@ -29,10 +32,12 @@ interface BoardState {
   addObject: (object: BoardObject) => void;
   updateObject: (id: string, updates: Partial<BoardObject>) => void;
   deleteObject: (id: string) => void;
+  deleteSelectedObjects: () => void;
   selectObject: (id: string, multiSelect?: boolean) => void;
   clearSelection: () => void;
   setPan: (x: number, y: number) => void;
   setZoom: (zoom: number) => void;
+  setActiveTool: (tool: ActiveTool) => void;
   clearObjects: () => void;
   rearrangeObjects: (positions: { id: string; x: number; y: number }[]) => void;
   syncToDatabase: () => Promise<void>;
@@ -54,6 +59,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   zoom: 1,
   isSyncing: false,
   lastSynced: null,
+  activeTool: 'select',
 
   setBoardId: (id) => set({ boardId: id }),
 
@@ -91,6 +97,18 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   })),
 
   clearSelection: () => set({ selectedObjectIds: [] }),
+
+  deleteSelectedObjects: () => {
+    const { selectedObjectIds } = get();
+    if (selectedObjectIds.length === 0) return;
+    set((state) => ({
+      objects: state.objects.filter((o) => !selectedObjectIds.includes(o.id)),
+      selectedObjectIds: [],
+    }));
+    scheduleSyncDebounced(get);
+  },
+
+  setActiveTool: (tool) => set({ activeTool: tool }),
 
   clearObjects: () => {
     set({ objects: [], selectedObjectIds: [] });
