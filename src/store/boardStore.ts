@@ -12,9 +12,10 @@ export interface BoardObject {
   color?: string;
   rotation?: number;
   points?: number[]; // freehand path points [x0,y0,x1,y1,...]
+  strokeColor?: string; // explicit stroke color (rect tool)
 }
 
-export type ActiveTool = 'select' | 'pan' | 'draw';
+export type ActiveTool = 'select' | 'pan' | 'draw' | 'rect';
 
 interface BoardState {
   boardId: string | null;

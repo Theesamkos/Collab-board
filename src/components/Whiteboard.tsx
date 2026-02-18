@@ -21,11 +21,26 @@ export function Whiteboard() {
   const [livePoints, setLivePoints] = useState<number[]>([]);
   const drawPointsRef = useRef<number[]>([]);
 
+  // Rect-tool state
+  const rectStartRef = useRef<{ x: number; y: number } | null>(null);
+  const liveRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [liveRect, setLiveRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const shiftHeldRef = useRef(false);
+
   // Resize listener
   useEffect(() => {
     const handleResize = () => setStageSize({ width: window.innerWidth, height: window.innerHeight });
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Track Shift key for square constraint
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftHeldRef.current = true; };
+    const up   = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftHeldRef.current = false; };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup',   up);
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
   }, []);
 
   // Auto-focus textarea when editing
@@ -55,6 +70,7 @@ export function Whiteboard() {
     select: 'default',
     pan:    'grab',
     draw:   'crosshair',
+    rect:   'crosshair',
   };
 
   const startEditing = (obj: BoardObject, e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -125,46 +141,85 @@ export function Whiteboard() {
     };
   };
 
-  // ── Freehand drawing handlers ──────────────────────────────────
+  // ── Drawing handlers (freehand + rect) ────────────────────────
   const handleDrawMouseDown = useCallback((_e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (activeTool !== 'draw') return;
     const stage = stageRef.current;
     if (!stage) return;
     const pos = stage.getRelativePointerPosition();
     if (!pos) return;
-    drawPointsRef.current = [pos.x, pos.y];
-    setLivePoints([pos.x, pos.y]);
-    setIsDrawing(true);
+
+    if (activeTool === 'draw') {
+      drawPointsRef.current = [pos.x, pos.y];
+      setLivePoints([pos.x, pos.y]);
+      setIsDrawing(true);
+    } else if (activeTool === 'rect') {
+      rectStartRef.current = pos;
+      liveRectRef.current = null;
+      setLiveRect(null);
+    }
   }, [activeTool]);
 
   const handleDrawMouseMove = useCallback((_e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (!isDrawing || activeTool !== 'draw') return;
     const stage = stageRef.current;
     if (!stage) return;
     const pos = stage.getRelativePointerPosition();
     if (!pos) return;
-    drawPointsRef.current = [...drawPointsRef.current, pos.x, pos.y];
-    setLivePoints([...drawPointsRef.current]);
+
+    if (activeTool === 'draw' && isDrawing) {
+      drawPointsRef.current = [...drawPointsRef.current, pos.x, pos.y];
+      setLivePoints([...drawPointsRef.current]);
+    } else if (activeTool === 'rect' && rectStartRef.current) {
+      const start = rectStartRef.current;
+      let w = pos.x - start.x;
+      let h = pos.y - start.y;
+      if (shiftHeldRef.current) {
+        const side = Math.min(Math.abs(w), Math.abs(h));
+        w = w < 0 ? -side : side;
+        h = h < 0 ? -side : side;
+      }
+      const r = {
+        x: w < 0 ? start.x + w : start.x,
+        y: h < 0 ? start.y + h : start.y,
+        width: Math.abs(w),
+        height: Math.abs(h),
+      };
+      liveRectRef.current = r;
+      setLiveRect(r);
+    }
   }, [isDrawing, activeTool]);
 
   const handleDrawMouseUp = useCallback(() => {
-    if (!isDrawing) return;
-    setIsDrawing(false);
-    const pts = drawPointsRef.current;
-    drawPointsRef.current = [];
-    setLivePoints([]);
-    if (pts.length < 4) return; // need at least 2 points
-    addObject({
-      id: crypto.randomUUID(),
-      type: 'line',
-      x: 0,
-      y: 0,
-      width: 0,
-      height: 0,
-      points: pts,
-      color: '#1a1a1a',
-    });
-  }, [isDrawing, addObject]);
+    if (activeTool === 'draw' && isDrawing) {
+      setIsDrawing(false);
+      const pts = drawPointsRef.current;
+      drawPointsRef.current = [];
+      setLivePoints([]);
+      if (pts.length >= 4) {
+        addObject({
+          id: crypto.randomUUID(),
+          type: 'line',
+          x: 0, y: 0, width: 0, height: 0,
+          points: pts,
+          color: '#1a1a1a',
+        });
+      }
+    } else if (activeTool === 'rect' && rectStartRef.current) {
+      const r = liveRectRef.current;
+      rectStartRef.current = null;
+      liveRectRef.current = null;
+      setLiveRect(null);
+      if (r && r.width > 4 && r.height > 4) {
+        addObject({
+          id: crypto.randomUUID(),
+          type: 'rectangle',
+          x: r.x, y: r.y,
+          width: r.width, height: r.height,
+          color: 'rgba(255,255,255,0.01)',
+          strokeColor: '#1a1a1a',
+        });
+      }
+    }
+  }, [isDrawing, activeTool, addObject]);
 
   const editingObj = editingId ? objects.find((o) => o.id === editingId) : null;
 
@@ -226,8 +281,8 @@ export function Whiteboard() {
             width={obj.width}
             height={obj.height}
             fill={obj.color || '#17a2b8'}
-            stroke={isSelected ? '#dc3545' : 'rgba(0,0,0,0.2)'}
-            strokeWidth={isSelected ? 2 : 1}
+            stroke={isSelected ? '#17a2b8' : (obj.strokeColor || 'rgba(0,0,0,0.2)')}
+            strokeWidth={isSelected ? 2.5 : (obj.strokeColor ? 2 : 1)}
             draggable={objectsDraggable}
             onClick={(e) => {
               e.cancelBubble = true;
@@ -294,7 +349,7 @@ export function Whiteboard() {
         scaleY={zoom}
         onWheel={handleWheel}
         onDragEnd={stageDraggable ? handleDragEnd : undefined}
-        onClick={activeTool !== 'draw' ? clearSelection : undefined}
+        onClick={activeTool === 'select' ? clearSelection : undefined}
         draggable={stageDraggable}
         onMouseDown={handleDrawMouseDown}
         onMouseMove={handleDrawMouseMove}
@@ -310,6 +365,19 @@ export function Whiteboard() {
               lineCap="round"
               lineJoin="round"
               tension={0.3}
+              listening={false}
+            />
+          )}
+          {liveRect && (
+            <Rect
+              x={liveRect.x}
+              y={liveRect.y}
+              width={liveRect.width}
+              height={liveRect.height}
+              fill="rgba(23,162,184,0.08)"
+              stroke="#17a2b8"
+              strokeWidth={1.5}
+              dash={[6, 3]}
               listening={false}
             />
           )}

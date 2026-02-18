@@ -316,6 +316,7 @@ export function Toolbar() {
         <ZoomControls />
         <Divider />
         <ToolBtn tool="draw"   icon={<Pencil size={13} />}        label="Draw" />
+        <ToolBtn tool="rect"   icon={<Square size={13} />}        label="Rectangle" />
         <ToolBtn tool="pan"    icon={<Hand size={13} />}           label="Pan" />
         <ToolBtn tool="select" icon={<MousePointer size={13} />}  label="Select" />
         <Divider />
