@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 // ── Dev-only API plugin ───────────────────────────────────────────────────────
@@ -238,5 +239,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), devApiPlugin(env.OPENAI_API_KEY ?? '')],
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, './src'),
+      },
+    },
   };
 });

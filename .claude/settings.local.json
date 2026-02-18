@@ -5,7 +5,12 @@
       "Bash(yes:*)",
       "Bash(npm create:*)",
       "Bash(npx create-vite@latest:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:magicui.design)"
     ]
   }
 }
