@@ -17,7 +17,7 @@ export function useBoardSync(boardId: string | null) {
     if (!boardId) return;
 
     const channel = supabase
-      .channel(`board-sync:${boardId}`)
+      .channel('board-sync:main-board')
       .on(
         'postgres_changes',
         {
