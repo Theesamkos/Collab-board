@@ -264,7 +264,7 @@ export function useAIAgent() {
         let forwardToLangChain = true;
 
         try {
-          const r = await fetch('http://localhost:8000/recognize-intent', {
+          const r = await fetch('https://collab-board-ai.onrender.com/recognize-intent', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ command: cmd }),
