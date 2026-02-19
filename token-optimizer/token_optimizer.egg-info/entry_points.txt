@@ -1,0 +1,3 @@
+[console_scripts]
+token-report = token_optimizer.cli:cmd_report
+token-route = token_optimizer.cli:cmd_route

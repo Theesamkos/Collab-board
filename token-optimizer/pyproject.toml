@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "token-optimizer"
+version = "0.1.0"
+description = "Claude API token cost & quality tooling for collab-board"
+requires-python = ">=3.11"
+dependencies = []   # stdlib only — no third-party deps required
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov"]
+
+[project.scripts]
+# CLI entry points — run these from inside the token-optimizer directory
+token-route   = "token_optimizer.cli:cmd_route"
+token-report  = "token_optimizer.cli:cmd_report"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["token_optimizer*"]

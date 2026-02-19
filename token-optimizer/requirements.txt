@@ -1,0 +1,9 @@
+# Runtime — token_optimizer uses stdlib only (json, re, pathlib, datetime, uuid)
+# No third-party packages required.
+
+# Dev / testing
+pytest>=8.0
+pytest-cov>=5.0
+
+# Optional: if you extend to call the real Anthropic API
+# anthropic>=0.25
