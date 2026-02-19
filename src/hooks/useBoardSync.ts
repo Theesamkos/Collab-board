@@ -22,7 +22,7 @@ export function useBoardSync(boardId: string | null) {
     useBoardStore.temporal.getState().clear();
 
     const channel = supabase
-      .channel('board-sync:main-board')
+      .channel(`board-sync:${boardId}`)
       .on(
         'postgres_changes',
         {

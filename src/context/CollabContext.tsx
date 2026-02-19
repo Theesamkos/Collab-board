@@ -58,7 +58,7 @@ export function CollabProvider({
   useEffect(() => {
     if (!boardId || !userId) return;
 
-    const channel = supabase.channel('collab:main-board', {
+    const channel = supabase.channel(`collab:${boardId}`, {
       config: {
         presence: { key: userId },
         broadcast: { self: false, ack: false },
@@ -126,7 +126,7 @@ export function CollabProvider({
       channel.unsubscribe();
       channelRef.current = null;
     };
-  }, [userId, userName]);
+  }, [boardId, userId, userName]);
 
   const broadcastCursor = (x: number, y: number) => {
     channelRef.current?.send({

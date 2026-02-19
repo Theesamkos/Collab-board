@@ -29,7 +29,7 @@ export function AuthCallback() {
           setTimeout(() => navigate('/login'), 3000);
           return;
         }
-        navigate('/board', { replace: true });
+        navigate('/dashboard', { replace: true });
         return;
       }
 
@@ -41,7 +41,7 @@ export function AuthCallback() {
           setTimeout(() => navigate('/login'), 3000);
           return;
         }
-        navigate('/board', { replace: true });
+        navigate('/dashboard', { replace: true });
         return;
       }
 

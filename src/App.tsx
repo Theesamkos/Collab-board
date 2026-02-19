@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { Login } from './pages/Login';
 import { Board } from './pages/Board';
+import { Dashboard } from './pages/Dashboard';
 import { AuthCallback } from './pages/AuthCallback';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -27,14 +28,22 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
       <Route
-        path="/board"
+        path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/board/:boardId"
         element={
           <ProtectedRoute>
             <Board />
           </ProtectedRoute>
         }
       />
-      <Route path="/" element={<Navigate to="/board" />} />
+      <Route path="/" element={<Navigate to="/dashboard" />} />
     </Routes>
   );
 }

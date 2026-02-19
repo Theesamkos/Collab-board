@@ -20,7 +20,7 @@ export function Login() {
   const [passwordFocused, setPasswordFocused] = useState(false);
 
   useEffect(() => {
-    if (session) navigate('/board');
+    if (session) navigate('/dashboard');
   }, [session, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {

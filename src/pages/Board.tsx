@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
-import { Loader2, Wifi, WifiOff, LogOut, ChevronUp, ChevronDown } from 'lucide-react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { Loader2, Wifi, WifiOff, LogOut, ChevronUp, ChevronDown, LayoutDashboard } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useBoardStore } from '../store/boardStore';
 import { useBoardSync } from '../hooks/useBoardSync';
@@ -147,6 +148,8 @@ function OnlineDropdown() {
 
 // ── Board page ────────────────────────────────────────────────────
 export function Board() {
+  const { boardId: routeBoardId } = useParams<{ boardId: string }>();
+  const navigate = useNavigate();
   const { session, signOut } = useAuth();
   const { boardId, setBoardId, setObjects, isSyncing } = useBoardStore();
   const [loading, setLoading] = useState(true);
@@ -154,47 +157,29 @@ export function Board() {
   const { status: syncStatus } = useBoardSync(boardId);
 
   useEffect(() => {
-    const initializeBoard = async () => {
-      if (!session?.user?.id) return;
+    const load = async () => {
+      if (!routeBoardId || !session?.user?.id) { navigate('/dashboard'); return; }
 
-      // All users share the same board — load the oldest one regardless of owner.
-      // This enables real-time collaboration and presence to work across users.
-      let { data: boards, error } = await supabase
+      const { data, error } = await supabase
         .from('boards')
         .select('id, objects')
-        .order('created_at', { ascending: true })
-        .limit(1);
+        .eq('id', routeBoardId)
+        .single();
 
-      let newBoardId: string;
-      let initialObjects: any[] = [];
+      if (error || !data) { navigate('/dashboard'); return; }
 
-      if (error || !boards || boards.length === 0) {
-        const { data, error: createError } = await supabase
-          .from('boards')
-          .insert([{ user_id: session.user.id, title: 'Shared Board', objects: [] }])
-          .select('id, objects')
-          .single();
+      // Auto-join: add current user as a member (enables share-link collaboration)
+      await supabase
+        .from('board_members')
+        .upsert({ board_id: routeBoardId, user_id: session.user.id });
 
-        if (createError) {
-          console.error('Error creating board:', createError);
-          setLoading(false);
-          return;
-        }
-
-        newBoardId = data.id;
-        initialObjects = data.objects || [];
-      } else {
-        newBoardId = boards[0].id;
-        initialObjects = boards[0].objects || [];
-      }
-
-      setBoardId(newBoardId);
-      setObjects(initialObjects);
+      setBoardId(data.id);
+      setObjects(data.objects ?? []);
       setLoading(false);
     };
 
-    initializeBoard();
-  }, [session, setBoardId, setObjects]);
+    load();
+  }, [routeBoardId, session, navigate, setBoardId, setObjects]);
 
   if (loading) {
     return (
@@ -230,6 +215,37 @@ export function Board() {
           gap: '10px',
         }}
       >
+        {/* Back to dashboard */}
+        <Link
+          to="/dashboard"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            padding: '5px 10px',
+            borderRadius: '6px',
+            fontSize: '12px',
+            fontWeight: 500,
+            color: '#666666',
+            backgroundColor: '#f5f5f5',
+            border: '1px solid #e0e0e0',
+            textDecoration: 'none',
+            flexShrink: 0,
+            transition: 'all 200ms ease',
+          }}
+          onMouseEnter={(e) => {
+            const a = e.currentTarget as HTMLAnchorElement;
+            a.style.backgroundColor = '#e8e8e8';
+          }}
+          onMouseLeave={(e) => {
+            const a = e.currentTarget as HTMLAnchorElement;
+            a.style.backgroundColor = '#f5f5f5';
+          }}
+        >
+          <LayoutDashboard size={12} />
+          Boards
+        </Link>
+
         {/* Logout (left) */}
         <button
           onClick={signOut}
