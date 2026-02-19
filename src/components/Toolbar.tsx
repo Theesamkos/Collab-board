@@ -3,7 +3,7 @@ import {
   StickyNote, Square, Circle,
   Save, Check, Loader2,
   Pencil, Hand, MousePointer, Trash2,
-  ZoomIn, ZoomOut, RotateCcw,
+  ZoomIn, ZoomOut, RotateCcw, Share2,
 } from 'lucide-react';
 import { useBoardStore, ActiveTool } from '../store/boardStore';
 import { v4 as uuidv4 } from 'uuid';
@@ -194,6 +194,8 @@ export function Toolbar() {
             active={activeTool === 'draw'} onClick={() => setTool('draw')} />
           <ToolDockIcon icon={<Square size={17} />} label="Rectangle (drag to draw)"
             active={activeTool === 'rect'} onClick={() => setTool('rect')} />
+          <ToolDockIcon icon={<Share2 size={17} />} label="Connector (connect objects)"
+            active={activeTool === 'connector'} onClick={() => setTool('connector')} />
           <ToolDockIcon icon={<Hand size={17} />} label="Pan"
             active={activeTool === 'pan'} onClick={() => setTool('pan')} />
           <ToolDockIcon icon={<MousePointer size={17} />} label="Select"
