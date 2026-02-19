@@ -1,10 +1,19 @@
+/**
+ * Vercel Serverless Function — /api/ai-command
+ *
+ * Accepts a natural-language whiteboard command and returns an array of
+ * tool calls to execute client-side.
+ *
+ * Model:        claude-sonnet-4-6  (via @langchain/anthropic)
+ * Observability: LangSmith  (set LANGCHAIN_TRACING_V2=true + LANGCHAIN_API_KEY)
+ */
+
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import OpenAI from 'openai';
+import { ChatAnthropic } from '@langchain/anthropic';
+import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// ── Tool definitions ─────────────────────────────────────────────────────────
-const tools: OpenAI.ChatCompletionTool[] = [
+// ── Tool definitions (OpenAI-compatible format; LangChain converts for Anthropic) ─
+const TOOLS: any[] = [
   {
     type: 'function',
     function: {
@@ -61,7 +70,7 @@ const tools: OpenAI.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'moveObject',
-      description: 'Move an existing object to a new position on the board.',
+      description: 'Move an object to a new position.',
       parameters: {
         type: 'object',
         properties: {
@@ -77,7 +86,7 @@ const tools: OpenAI.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'deleteObject',
-      description: 'Delete a specific object from the board by its ID.',
+      description: 'Delete a specific object by ID.',
       parameters: {
         type: 'object',
         properties: {
@@ -91,13 +100,13 @@ const tools: OpenAI.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'updateStickyNote',
-      description: 'Update the text content or color of an existing sticky note.',
+      description: 'Update the text or color of an existing sticky note.',
       parameters: {
         type: 'object',
         properties: {
-          objectId: { type: 'string', description: 'ID of the sticky note.' },
-          text:  { type: 'string', description: 'New text content.' },
-          color: { type: 'string', description: 'New background color (optional).' },
+          objectId: { type: 'string' },
+          text:     { type: 'string', description: 'New text content.' },
+          color:    { type: 'string', description: 'New background color.' },
         },
         required: ['objectId'],
       },
@@ -107,7 +116,7 @@ const tools: OpenAI.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'clearBoard',
-      description: 'Remove ALL objects from the board, leaving it completely empty.',
+      description: 'Remove ALL objects from the board.',
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
@@ -115,11 +124,11 @@ const tools: OpenAI.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'changeColor',
-      description: 'Change the fill color of any object on the board.',
+      description: 'Change the fill color of any object.',
       parameters: {
         type: 'object',
         properties: {
-          objectId: { type: 'string', description: 'ID of the object.' },
+          objectId: { type: 'string' },
           color:    { type: 'string', description: 'New color: hex or name.' },
         },
         required: ['objectId', 'color'],
@@ -135,7 +144,7 @@ const tools: OpenAI.ChatCompletionTool[] = [
         type: 'object',
         properties: {
           columns: { type: 'number', description: 'Number of columns (default 3).' },
-          spacing: { type: 'number', description: 'Gap between objects in pixels (default 240).' },
+          spacing: { type: 'number', description: 'Pixel gap between objects (default 240).' },
         },
         required: [],
       },
@@ -143,7 +152,7 @@ const tools: OpenAI.ChatCompletionTool[] = [
   },
 ];
 
-// ── Handler ──────────────────────────────────────────────────────────────────
+// ── Handler ───────────────────────────────────────────────────────────────────
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -158,53 +167,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Missing or invalid boardId' });
   }
 
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
+  }
+
   try {
-    const systemPrompt = `You are an AI assistant for a collaborative whiteboard app.
+    // LangSmith tracing is configured via env vars:
+    //   LANGCHAIN_TRACING_V2=true
+    //   LANGCHAIN_API_KEY=<langsmith_key>
+    //   LANGCHAIN_PROJECT=collab-board
+    // LangChain reads these automatically — no extra code needed.
+
+    const model = new ChatAnthropic({
+      model: 'claude-sonnet-4-6',
+      temperature: 0,
+      apiKey,
+    });
+
+    const modelWithTools = model.bindTools(TOOLS);
+
+    const systemPrompt = `You are an AI assistant for a collaborative whiteboard app called CollabBoard.
 Translate the user's natural language command into one or more tool calls.
 
 Rules:
-- When positions aren't specified, spread objects across the canvas (x: 80–700, y: 80–500). Avoid stacking.
+- Spread objects across the canvas (x: 80–700, y: 80–500). Avoid stacking.
 - Default sizes: sticky notes 200×150px, rectangles 200×140px, circles radius 60px.
-- Use hex color values directly (e.g. yellow → #FFDD57, red → #EF4444, blue → #3B82F6, green → #22C55E, purple → #8B5CF6, orange → #F97316, pink → #EC4899).
-- To create several objects, emit multiple tool calls in one response.
-- When the user refers to "all sticky notes" or "all rectangles", find the matching IDs in the board state.
-- Prefer updateStickyNote over delete + create when editing existing notes.
-- For "clear the board" or "delete everything", use the clearBoard tool — never call deleteObject for each item.
-- Never invent objectIds; only use IDs present in the board state.
+- Use hex color values (yellow→#FFDD57, red→#EF4444, blue→#3B82F6, green→#22C55E, purple→#8B5CF6, orange→#F97316, pink→#EC4899).
+- Emit multiple tool calls in one response when creating several objects.
+- When the user refers to "all sticky notes" etc, find matching IDs in the board state.
+- Prefer updateStickyNote over delete + create when editing text.
+- For "clear the board", use clearBoard — not individual deleteObject calls.
+- Never invent objectIds; only use IDs present in the board state below.
 
-Current board state (JSON):
+Current board state:
 ${JSON.stringify(boardState ?? [], null, 2)}`;
 
-    const aiResponse = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user',   content: command },
-      ],
-      tools,
-      tool_choice: 'auto',
-      temperature: 0.2,
-    });
+    const response = await modelWithTools.invoke([
+      new SystemMessage(systemPrompt),
+      new HumanMessage(command),
+    ]);
 
-    const message = aiResponse.choices[0].message;
-    const rawCalls = message.tool_calls ?? [];
-
-    // Parse and return tool calls — the frontend will execute them locally
-    const toolCalls = rawCalls.map((tc) => {
-      let args: Record<string, unknown> = {};
-      try { args = JSON.parse(tc.function.arguments); } catch { /* leave empty */ }
-      return { name: tc.function.name, args };
-    });
+    const toolCalls = (response.tool_calls ?? []).map((tc: any) => ({
+      name: tc.name,
+      args: tc.args ?? {},
+    }));
 
     return res.status(200).json({
       success: true,
       toolCalls,
-      // Pass through any text reply if the model chose not to call a tool
-      message: rawCalls.length === 0 ? (message.content ?? '') : undefined,
+      message: toolCalls.length === 0 ? String(response.content ?? '') : undefined,
     });
 
   } catch (err) {
-    console.error('AI command error:', err);
+    console.error('[api/ai-command] error:', err);
     return res.status(500).json({ error: 'AI service error', details: String(err) });
   }
 }

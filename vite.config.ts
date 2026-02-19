@@ -7,9 +7,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 // In production the same logic lives in api/ai-command.ts (Vercel serverless).
 // In dev, Vite doesn't run Vercel functions, so we handle /api/ai-command here.
 //
-// loadEnv with prefix='' loads ALL vars from .env/.env.local (not just VITE_*).
-// This is the only way to read non-VITE_ vars in a configureServer plugin.
-function devApiPlugin(openaiApiKey: string) {
+// Uses claude-sonnet-4-6 via @langchain/anthropic.
+// Set LANGCHAIN_TRACING_V2=true + LANGCHAIN_API_KEY in .env.local to enable
+// LangSmith observability for every agent invocation.
+function devApiPlugin(anthropicApiKey: string) {
   return {
     name: 'dev-api',
     configureServer(server: any) {
@@ -22,11 +23,8 @@ function devApiPlugin(openaiApiKey: string) {
             res.end(JSON.stringify(body));
           };
 
-          if (req.method !== 'POST') {
-            return send(405, { error: 'Method not allowed' });
-          }
+          if (req.method !== 'POST') return send(405, { error: 'Method not allowed' });
 
-          // Collect request body
           let raw = '';
           req.on('data', (chunk) => { raw += chunk; });
           req.on('end', async () => {
@@ -39,16 +37,15 @@ function devApiPlugin(openaiApiKey: string) {
               if (!boardId || typeof boardId !== 'string') {
                 return send(400, { error: 'Missing or invalid boardId' });
               }
-
-              const apiKey = openaiApiKey;
-              if (!apiKey) {
-                return send(500, { error: 'OPENAI_API_KEY not set in .env.local' });
+              if (!anthropicApiKey) {
+                return send(500, { error: 'ANTHROPIC_API_KEY not set in .env.local' });
               }
 
-              // Dynamic import so OpenAI is only loaded when the route is hit
-              const { default: OpenAI } = await import('openai');
-              const openai = new OpenAI({ apiKey });
+              // Dynamic import — only loaded when the route is hit
+              const { ChatAnthropic } = await import('@langchain/anthropic');
+              const { HumanMessage, SystemMessage } = await import('@langchain/core/messages');
 
+              // ── Tool definitions (OpenAI-compatible format; LangChain converts for Anthropic) ─
               const tools: any[] = [
                 {
                   type: 'function',
@@ -58,10 +55,10 @@ function devApiPlugin(openaiApiKey: string) {
                     parameters: {
                       type: 'object',
                       properties: {
-                        text:  { type: 'string' },
-                        x:     { type: 'number' },
-                        y:     { type: 'number' },
-                        color: { type: 'string', description: 'hex or name (yellow, pink, blue…)' },
+                        text:  { type: 'string', description: 'Text written on the sticky note.' },
+                        x:     { type: 'number', description: 'Left edge X position in canvas pixels.' },
+                        y:     { type: 'number', description: 'Top edge Y position in canvas pixels.' },
+                        color: { type: 'string', description: 'Background color: hex (#FFDD57) or name (yellow, pink, blue…).' },
                       },
                       required: ['text'],
                     },
@@ -71,13 +68,15 @@ function devApiPlugin(openaiApiKey: string) {
                   type: 'function',
                   function: {
                     name: 'createRectangle',
-                    description: 'Create a rectangle shape.',
+                    description: 'Create a rectangle shape on the whiteboard.',
                     parameters: {
                       type: 'object',
                       properties: {
-                        x: { type: 'number' }, y: { type: 'number' },
-                        width: { type: 'number' }, height: { type: 'number' },
-                        color: { type: 'string' },
+                        x:      { type: 'number', description: 'Left edge X position.' },
+                        y:      { type: 'number', description: 'Top edge Y position.' },
+                        width:  { type: 'number', description: 'Width in pixels.' },
+                        height: { type: 'number', description: 'Height in pixels.' },
+                        color:  { type: 'string', description: 'Fill color: hex or name.' },
                       },
                       required: [],
                     },
@@ -87,12 +86,14 @@ function devApiPlugin(openaiApiKey: string) {
                   type: 'function',
                   function: {
                     name: 'createCircle',
-                    description: 'Create a circle shape.',
+                    description: 'Create a circle shape on the whiteboard.',
                     parameters: {
                       type: 'object',
                       properties: {
-                        x: { type: 'number' }, y: { type: 'number' },
-                        radius: { type: 'number' }, color: { type: 'string' },
+                        x:      { type: 'number', description: 'Center X position.' },
+                        y:      { type: 'number', description: 'Center Y position.' },
+                        radius: { type: 'number', description: 'Radius in pixels.' },
+                        color:  { type: 'string', description: 'Fill color: hex or name.' },
                       },
                       required: [],
                     },
@@ -106,8 +107,9 @@ function devApiPlugin(openaiApiKey: string) {
                     parameters: {
                       type: 'object',
                       properties: {
-                        objectId: { type: 'string' },
-                        x: { type: 'number' }, y: { type: 'number' },
+                        objectId: { type: 'string', description: 'ID of the object to move.' },
+                        x: { type: 'number', description: 'New X position.' },
+                        y: { type: 'number', description: 'New Y position.' },
                       },
                       required: ['objectId', 'x', 'y'],
                     },
@@ -120,7 +122,9 @@ function devApiPlugin(openaiApiKey: string) {
                     description: 'Delete a specific object by ID.',
                     parameters: {
                       type: 'object',
-                      properties: { objectId: { type: 'string' } },
+                      properties: {
+                        objectId: { type: 'string', description: 'ID of the object to delete.' },
+                      },
                       required: ['objectId'],
                     },
                   },
@@ -129,12 +133,13 @@ function devApiPlugin(openaiApiKey: string) {
                   type: 'function',
                   function: {
                     name: 'updateStickyNote',
-                    description: 'Update text or color of an existing sticky note.',
+                    description: 'Update the text or color of an existing sticky note.',
                     parameters: {
                       type: 'object',
                       properties: {
                         objectId: { type: 'string' },
-                        text: { type: 'string' }, color: { type: 'string' },
+                        text:     { type: 'string', description: 'New text content.' },
+                        color:    { type: 'string', description: 'New background color.' },
                       },
                       required: ['objectId'],
                     },
@@ -156,7 +161,8 @@ function devApiPlugin(openaiApiKey: string) {
                     parameters: {
                       type: 'object',
                       properties: {
-                        objectId: { type: 'string' }, color: { type: 'string' },
+                        objectId: { type: 'string' },
+                        color:    { type: 'string', description: 'New color: hex or name.' },
                       },
                       required: ['objectId', 'color'],
                     },
@@ -170,7 +176,8 @@ function devApiPlugin(openaiApiKey: string) {
                     parameters: {
                       type: 'object',
                       properties: {
-                        columns: { type: 'number' }, spacing: { type: 'number' },
+                        columns: { type: 'number', description: 'Number of columns (default 3).' },
+                        spacing: { type: 'number', description: 'Pixel gap between objects (default 240).' },
                       },
                       required: [],
                     },
@@ -178,7 +185,8 @@ function devApiPlugin(openaiApiKey: string) {
                 },
               ];
 
-              const systemPrompt = `You are an AI assistant for a collaborative whiteboard app.
+              // ── System prompt with live board state ──────────────────────────
+              const systemPrompt = `You are an AI assistant for a collaborative whiteboard app called CollabBoard.
 Translate the user's natural language command into one or more tool calls.
 
 Rules:
@@ -187,37 +195,38 @@ Rules:
 - Use hex color values (yellow→#FFDD57, red→#EF4444, blue→#3B82F6, green→#22C55E, purple→#8B5CF6, orange→#F97316, pink→#EC4899).
 - Emit multiple tool calls in one response when creating several objects.
 - When the user refers to "all sticky notes" etc, find matching IDs in the board state.
-- Prefer updateStickyNote over delete + create when editing.
+- Prefer updateStickyNote over delete + create when editing text.
 - For "clear the board", use clearBoard — not individual deleteObject calls.
-- Never invent objectIds; only use IDs from the board state below.
+- Never invent objectIds; only use IDs present in the board state below.
 
 Current board state:
 ${JSON.stringify(boardState ?? [], null, 2)}`;
 
-              const aiResponse = await openai.chat.completions.create({
-                model: 'gpt-4o-mini',
-                messages: [
-                  { role: 'system', content: systemPrompt },
-                  { role: 'user',   content: command },
-                ],
-                tools,
-                tool_choice: 'auto',
-                temperature: 0.2,
+              // ── Invoke claude-sonnet-4-6 with tool binding ───────────────────
+              const model = new ChatAnthropic({
+                model: 'claude-sonnet-4-6',
+                temperature: 0,
+                apiKey: anthropicApiKey,
               });
 
-              const message = aiResponse.choices[0].message;
-              const rawCalls = message.tool_calls ?? [];
+              // bindTools accepts OpenAI-format definitions; LangChain converts for Anthropic
+              const modelWithTools = model.bindTools(tools);
 
-              const toolCalls = rawCalls.map((tc: any) => {
-                let args: Record<string, unknown> = {};
-                try { args = JSON.parse(tc.function.arguments); } catch { /* leave empty */ }
-                return { name: tc.function.name, args };
-              });
+              const response = await modelWithTools.invoke([
+                new SystemMessage(systemPrompt),
+                new HumanMessage(command),
+              ]);
+
+              // Extract tool calls from the LangChain response
+              const toolCalls = (response.tool_calls ?? []).map((tc: any) => ({
+                name: tc.name,
+                args: tc.args ?? {},
+              }));
 
               return send(200, {
                 success: true,
                 toolCalls,
-                message: rawCalls.length === 0 ? (message.content ?? '') : undefined,
+                message: toolCalls.length === 0 ? String(response.content ?? '') : undefined,
               });
 
             } catch (err) {
@@ -225,20 +234,28 @@ ${JSON.stringify(boardState ?? [], null, 2)}`;
               return send(500, { error: 'AI service error', details: String(err) });
             }
           });
-        }
+        },
       );
     },
   };
 }
 
 // ── Vite config ───────────────────────────────────────────────────────────────
-// Use the function form so we can call loadEnv before plugins are resolved.
 export default defineConfig(({ mode }) => {
-  // Load all vars from .env / .env.local (empty prefix = no filtering)
+  // Load ALL vars from .env / .env.local (empty prefix = no filtering).
+  // This lets us read ANTHROPIC_API_KEY, LANGCHAIN_* without a VITE_ prefix,
+  // keeping those secrets out of the browser bundle.
   const env = loadEnv(mode, process.cwd(), '');
 
+  // Forward LangSmith env vars into the Node process so LangChain picks them up
+  if (env.LANGCHAIN_TRACING_V2) {
+    process.env.LANGCHAIN_TRACING_V2 = env.LANGCHAIN_TRACING_V2;
+    process.env.LANGCHAIN_API_KEY    = env.LANGCHAIN_API_KEY ?? '';
+    process.env.LANGCHAIN_PROJECT    = env.LANGCHAIN_PROJECT ?? 'collab-board';
+  }
+
   return {
-    plugins: [react(), devApiPlugin(env.OPENAI_API_KEY ?? '')],
+    plugins: [react(), devApiPlugin(env.ANTHROPIC_API_KEY ?? '')],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
