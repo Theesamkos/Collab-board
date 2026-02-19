@@ -4,8 +4,10 @@ import {
   Save, Check, Loader2,
   Pencil, Hand, MousePointer, Trash2,
   ZoomIn, ZoomOut, RotateCcw, Share2,
+  Undo2, Redo2,
 } from 'lucide-react';
 import { useBoardStore, ActiveTool } from '../store/boardStore';
+import { useUndoRedo } from '../hooks/useUndoRedo';
 import { v4 as uuidv4 } from 'uuid';
 import { AICommandInput } from './AICommandInput';
 import { Dock, DockIcon } from './ui/dock';
@@ -117,6 +119,8 @@ export function Toolbar() {
     selectedObjectIds, deleteSelectedObjects,
   } = useBoardStore();
 
+  const { undo, redo, canUndo, canRedo } = useUndoRedo();
+
   const pct = Math.round(zoom * 100);
   const has = selectedObjectIds.length > 0;
 
@@ -210,6 +214,14 @@ export function Toolbar() {
             color="#17a2b8" onClick={addRect} />
           <ToolDockIcon icon={<Circle size={17} />} label="Add circle"
             color="#28a745" onClick={addCircle} />
+
+          <DockSep />
+
+          {/* Undo / Redo */}
+          <ToolDockIcon icon={<Undo2 size={17} />} label="Undo (Cmd+Z)"
+            disabled={!canUndo} onClick={undo} />
+          <ToolDockIcon icon={<Redo2 size={17} />} label="Redo (Cmd+Shift+Z)"
+            disabled={!canRedo} onClick={redo} />
 
           <DockSep />
 

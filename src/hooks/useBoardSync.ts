@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useBoardStore } from '../store/boardStore';
 
+
 type SyncStatus = 'connecting' | 'connected' | 'disconnected';
 
 /**
@@ -16,6 +17,10 @@ export function useBoardSync(boardId: string | null) {
   useEffect(() => {
     if (!boardId) return;
 
+    // Clear local undo history whenever we (re-)connect to a board so
+    // the user can't undo past the start of their session.
+    useBoardStore.temporal.getState().clear();
+
     const channel = supabase
       .channel('board-sync:main-board')
       .on(
@@ -28,7 +33,11 @@ export function useBoardSync(boardId: string | null) {
         },
         (payload) => {
           if (payload.new && 'objects' in payload.new) {
+            // Pause history so remote updates are NOT recorded in the local
+            // user's undo stack — only their own actions should be undoable.
+            useBoardStore.temporal.getState().pause();
             setObjects((payload.new as { objects: any[] }).objects ?? []);
+            useBoardStore.temporal.getState().resume();
           }
         }
       )

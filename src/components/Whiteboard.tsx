@@ -263,13 +263,17 @@ export function Whiteboard() {
     }
   }, []);
 
-  // Called on dragEnd — commits final positions for all selected objects
+  // Called on dragEnd — commits final positions for all selected objects.
+  // Pause/resume ensures the entire group move is a single undo step.
   const handleGroupDragEnd = useCallback((draggedId: string, finalX: number, finalY: number) => {
+    useBoardStore.temporal.getState().pause();
+
     updateObject(draggedId, { x: finalX, y: finalY });
 
     const ids = selectedObjectIdsRef.current;
     if (!ids.includes(draggedId) || ids.length < 2 || !dragStartPosRef.current) {
       dragStartPosRef.current = null;
+      useBoardStore.temporal.getState().resume();
       return;
     }
 
@@ -283,6 +287,8 @@ export function Whiteboard() {
       if (!obj || obj.type === 'connector' || obj.type === 'line') continue;
       updateObject(id, { x: obj.x + dx, y: obj.y + dy });
     }
+
+    useBoardStore.temporal.getState().resume();
   }, [updateObject]);
 
   // ── Stage mouse handlers ──────────────────────────────────────────

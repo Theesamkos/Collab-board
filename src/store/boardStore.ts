@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { temporal } from 'zundo';
 import { supabase } from '../lib/supabase';
 
 export type ConnectionPointId = 'top' | 'bottom' | 'left' | 'right' | 'center';
@@ -70,7 +71,9 @@ const scheduleSyncDebounced = (get: () => BoardState) => {
   syncTimeout = setTimeout(() => get().syncToDatabase(), 600);
 };
 
-export const useBoardStore = create<BoardState>((set, get) => ({
+export const useBoardStore = create<BoardState>()(
+  temporal(
+    (set, get) => ({
   boardId: null,
   objects: [],
   selectedObjectIds: [],
@@ -279,4 +282,11 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
     if (error) console.error('Sync error:', error);
   },
-}));
+    }),
+    {
+      // Track only the objects array — camera/selection/clipboard changes are intentionally excluded
+      partialize: (state) => ({ objects: state.objects }),
+      limit: 100,
+    }
+  )
+);
