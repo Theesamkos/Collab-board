@@ -286,6 +286,10 @@ export const useBoardStore = create<BoardState>()(
     {
       // Track only the objects array — camera/selection/clipboard changes are intentionally excluded
       partialize: (state) => ({ objects: state.objects }),
+      // Only record a history entry when the objects array reference actually changes.
+      // Without this, every set() call (pan, zoom, select, etc.) creates a spurious entry,
+      // making the user press Undo many times before a visible change appears.
+      equality: (a, b) => a.objects === b.objects,
       limit: 100,
     }
   )

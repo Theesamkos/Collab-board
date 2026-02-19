@@ -264,8 +264,12 @@ export function Whiteboard() {
   }, []);
 
   // Called on dragEnd — commits final positions for all selected objects.
-  // Pause/resume ensures the entire group move is a single undo step.
+  // Pause/resume batches all updateObject calls so they produce a single undo step;
+  // after resume we manually push one history entry via temporal.setState.
   const handleGroupDragEnd = useCallback((draggedId: string, finalX: number, finalY: number) => {
+    // Snapshot BEFORE any mutations so we have a "before" state for undo
+    const preObjects = useBoardStore.getState().objects;
+
     useBoardStore.temporal.getState().pause();
 
     updateObject(draggedId, { x: finalX, y: finalY });
@@ -273,22 +277,32 @@ export function Whiteboard() {
     const ids = selectedObjectIdsRef.current;
     if (!ids.includes(draggedId) || ids.length < 2 || !dragStartPosRef.current) {
       dragStartPosRef.current = null;
-      useBoardStore.temporal.getState().resume();
-      return;
-    }
+    } else {
+      const dx = finalX - dragStartPosRef.current.x;
+      const dy = finalY - dragStartPosRef.current.y;
+      dragStartPosRef.current = null;
 
-    const dx = finalX - dragStartPosRef.current.x;
-    const dy = finalY - dragStartPosRef.current.y;
-    dragStartPosRef.current = null;
-
-    for (const id of ids) {
-      if (id === draggedId) continue;
-      const obj = objectsRef.current.find((o) => o.id === id);
-      if (!obj || obj.type === 'connector' || obj.type === 'line') continue;
-      updateObject(id, { x: obj.x + dx, y: obj.y + dy });
+      for (const id of ids) {
+        if (id === draggedId) continue;
+        const obj = objectsRef.current.find((o) => o.id === id);
+        if (!obj || obj.type === 'connector' || obj.type === 'line') continue;
+        updateObject(id, { x: obj.x + dx, y: obj.y + dy });
+      }
     }
 
     useBoardStore.temporal.getState().resume();
+
+    // Push exactly one history entry covering the entire drag operation
+    const postObjects = useBoardStore.getState().objects;
+    if (postObjects !== preObjects) {
+      useBoardStore.temporal.setState((s) => ({
+        pastStates: [
+          ...(s.pastStates.length >= 100 ? s.pastStates.slice(1) : s.pastStates),
+          { objects: preObjects },
+        ],
+        futureStates: [],
+      }));
+    }
   }, [updateObject]);
 
   // ── Stage mouse handlers ──────────────────────────────────────────
