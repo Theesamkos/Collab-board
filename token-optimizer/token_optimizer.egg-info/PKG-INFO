@@ -1,8 +1,0 @@
-Metadata-Version: 2.4
-Name: token-optimizer
-Version: 0.1.0
-Summary: Claude API token cost & quality tooling for collab-board
-Requires-Python: >=3.11
-Provides-Extra: dev
-Requires-Dist: pytest>=8; extra == "dev"
-Requires-Dist: pytest-cov; extra == "dev"
