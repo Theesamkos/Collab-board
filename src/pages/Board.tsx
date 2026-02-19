@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Loader2, Wifi, WifiOff, LogOut, ChevronUp, ChevronDown, LayoutDashboard } from 'lucide-react';
+import { Loader2, Wifi, WifiOff, LogOut, ChevronUp, ChevronDown, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useBoardStore } from '../store/boardStore';
 import { useBoardSync } from '../hooks/useBoardSync';
@@ -11,7 +11,7 @@ import { CursorTracker } from '../components/CursorTracker';
 import { RemoteCursors } from '../components/RemoteCursors';
 import { CollabProvider, useCollab } from '../context/CollabContext';
 
-// ── Inline presence dropdown ──────────────────────────────────────
+// ── Online presence dropdown ──────────────────────────────────
 function OnlineDropdown() {
   const { session } = useAuth();
   const { onlineUsers: users } = useCollab();
@@ -20,9 +20,7 @@ function OnlineDropdown() {
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -43,97 +41,56 @@ function OnlineDropdown() {
       <button
         onClick={() => setOpen((v) => !v)}
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          padding: '5px 10px',
-          borderRadius: '6px',
-          fontSize: '12px',
-          fontWeight: 600,
-          backgroundColor: '#f5f5f5',
-          border: '1px solid #e0e0e0',
-          color: '#1a1a1a',
-          cursor: 'pointer',
-          transition: 'background-color 200ms ease',
-          userSelect: 'none',
+          display: 'flex', alignItems: 'center', gap: '6px',
+          padding: '5px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 600,
+          backgroundColor: 'rgba(255,255,255,0.07)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          color: 'rgba(255,255,255,0.8)',
+          cursor: 'pointer', transition: 'all 200ms ease', userSelect: 'none',
         }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = '#e8e8e8'; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = '#f5f5f5'; }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(255,255,255,0.12)'; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(255,255,255,0.07)'; }}
       >
-        <span
-          style={{
-            width: '7px',
-            height: '7px',
-            borderRadius: '50%',
-            backgroundColor: '#28a745',
-            flexShrink: 0,
-            animation: 'presence-pulse 2s ease-in-out infinite',
-          }}
-        />
+        <span style={{
+          width: 7, height: 7, borderRadius: '50%', backgroundColor: '#28a745',
+          flexShrink: 0, animation: 'presence-pulse 2s ease-in-out infinite',
+        }} />
         Online
-        <span
-          style={{
-            backgroundColor: '#17a2b8',
-            color: '#fff',
-            borderRadius: '10px',
-            fontSize: '10px',
-            fontWeight: 700,
-            padding: '1px 6px',
-          }}
-        >
+        <span style={{
+          backgroundColor: '#17c5c8', color: '#000',
+          borderRadius: '10px', fontSize: '10px', fontWeight: 700, padding: '1px 6px',
+        }}>
           {count}
         </span>
         {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
       </button>
 
       {open && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            right: 0,
-            minWidth: '200px',
-            backgroundColor: '#ffffff',
-            border: '1px solid #e0e0e0',
-            borderRadius: '10px',
-            padding: '10px 12px',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-            zIndex: 200,
-          }}
-        >
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 8px)', right: 0, minWidth: '200px',
+          backgroundColor: 'rgba(10,20,38,0.97)',
+          border: '1px solid rgba(23,197,200,0.2)',
+          borderRadius: '12px', padding: '10px 12px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5)', zIndex: 200,
+        }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
             {users.map((user) => {
-              const color = user.color;
               const isYou = user.userId === currentUserId;
               return (
                 <div key={user.userId} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div
-                    style={{
-                      width: '28px',
-                      height: '28px',
-                      borderRadius: '50%',
-                      backgroundColor: color,
-                      flexShrink: 0,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '10px',
-                      fontWeight: 700,
-                      color: '#fff',
-                    }}
-                  >
+                  <div style={{
+                    width: 28, height: 28, borderRadius: '50%',
+                    backgroundColor: user.color, flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '10px', fontWeight: 700, color: '#fff',
+                  }}>
                     {initials(user.userName)}
                   </div>
-                  <span
-                    style={{
-                      fontSize: '12px',
-                      fontWeight: isYou ? 600 : 500,
-                      color: '#1a1a1a',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
+                  <span style={{
+                    fontSize: '12px', fontWeight: isYou ? 600 : 500,
+                    color: isYou ? '#ffffff' : 'rgba(255,255,255,0.75)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
                     {isYou ? 'You' : user.userName}
                   </span>
                 </div>
@@ -146,13 +103,14 @@ function OnlineDropdown() {
   );
 }
 
-// ── Board page ────────────────────────────────────────────────────
+// ── Board page ────────────────────────────────────────────────
 export function Board() {
   const { boardId: routeBoardId } = useParams<{ boardId: string }>();
   const navigate = useNavigate();
   const { session, signOut } = useAuth();
   const { boardId, setBoardId, setObjects, isSyncing } = useBoardStore();
   const [loading, setLoading] = useState(true);
+  const [boardTitle, setBoardTitle] = useState('');
 
   const { status: syncStatus } = useBoardSync(boardId);
 
@@ -162,18 +120,18 @@ export function Board() {
 
       const { data, error } = await supabase
         .from('boards')
-        .select('id, objects')
+        .select('id, title, objects')
         .eq('id', routeBoardId)
         .single();
 
       if (error || !data) { navigate('/dashboard'); return; }
 
-      // Auto-join: add current user as a member (enables share-link collaboration)
       await supabase
         .from('board_members')
         .upsert({ board_id: routeBoardId, user_id: session.user.id });
 
       setBoardId(data.id);
+      setBoardTitle(data.title ?? 'Untitled Board');
       setObjects(data.objects ?? []);
       setLoading(false);
     };
@@ -183,13 +141,13 @@ export function Board() {
 
   if (loading) {
     return (
-      <div
-        className="flex items-center justify-center h-screen"
-        style={{ backgroundColor: '#f5f5f5' }}
-      >
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 size={28} className="animate-spin" style={{ color: '#17a2b8' }} />
-          <p style={{ color: '#666666', fontSize: '14px' }}>Loading your board…</p>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh',
+        background: 'linear-gradient(160deg, #070d1a 0%, #0d1a2e 50%, #0a1525 100%)',
+      }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
+          <Loader2 size={28} className="animate-spin" style={{ color: '#17c5c8' }} />
+          <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: '14px' }}>Loading your board…</p>
         </div>
       </div>
     );
@@ -197,146 +155,119 @@ export function Board() {
 
   return (
     <CollabProvider boardId={boardId!}>
-    <div className="h-screen flex flex-col" style={{ backgroundColor: '#ffffff' }}>
-      <CursorTracker />
-      <RemoteCursors />
+      <div className="h-screen flex flex-col" style={{ backgroundColor: '#ffffff' }}>
+        <CursorTracker />
+        <RemoteCursors />
 
-      {/* ── Header ─────────────────────────────────────────── */}
-      <header
-        style={{
-          backgroundColor: '#ffffff',
-          borderBottom: '1px solid #e0e0e0',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-          height: '48px',
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          padding: '0 14px',
-          gap: '10px',
-        }}
-      >
-        {/* Back to dashboard */}
-        <Link
-          to="/dashboard"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '5px',
-            padding: '5px 10px',
-            borderRadius: '6px',
-            fontSize: '12px',
-            fontWeight: 500,
-            color: '#666666',
-            backgroundColor: '#f5f5f5',
-            border: '1px solid #e0e0e0',
-            textDecoration: 'none',
-            flexShrink: 0,
-            transition: 'all 200ms ease',
-          }}
-          onMouseEnter={(e) => {
-            const a = e.currentTarget as HTMLAnchorElement;
-            a.style.backgroundColor = '#e8e8e8';
-          }}
-          onMouseLeave={(e) => {
-            const a = e.currentTarget as HTMLAnchorElement;
-            a.style.backgroundColor = '#f5f5f5';
-          }}
-        >
-          <LayoutDashboard size={12} />
-          Boards
-        </Link>
+        {/* ── Header ── */}
+        <header style={{
+          backgroundColor: 'rgba(7,13,26,0.97)',
+          backdropFilter: 'blur(16px)',
+          borderBottom: '1px solid rgba(23,197,200,0.15)',
+          height: '48px', flexShrink: 0,
+          display: 'flex', alignItems: 'center',
+          padding: '0 14px', gap: '8px',
+        }}>
+          {/* Left: Back + Logout */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+            <Link
+              to="/dashboard"
+              style={{
+                display: 'flex', alignItems: 'center', gap: '5px',
+                padding: '5px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 500,
+                color: 'rgba(255,255,255,0.65)',
+                backgroundColor: 'rgba(255,255,255,0.07)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                textDecoration: 'none', transition: 'all 200ms ease',
+              }}
+              onMouseEnter={(e) => {
+                const a = e.currentTarget as HTMLAnchorElement;
+                a.style.backgroundColor = 'rgba(255,255,255,0.12)';
+                a.style.color = '#ffffff';
+              }}
+              onMouseLeave={(e) => {
+                const a = e.currentTarget as HTMLAnchorElement;
+                a.style.backgroundColor = 'rgba(255,255,255,0.07)';
+                a.style.color = 'rgba(255,255,255,0.65)';
+              }}
+            >
+              <ArrowLeft size={12} />
+              Back
+            </Link>
 
-        {/* Logout (left) */}
-        <button
-          onClick={signOut}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '5px',
-            padding: '5px 10px',
-            borderRadius: '6px',
-            fontSize: '12px',
-            fontWeight: 500,
-            color: '#666666',
-            backgroundColor: '#f5f5f5',
-            border: '1px solid #e0e0e0',
-            cursor: 'pointer',
-            transition: 'all 200ms ease',
-            flexShrink: 0,
-          }}
-          onMouseEnter={(e) => {
-            const b = e.currentTarget as HTMLButtonElement;
-            b.style.backgroundColor = '#fee2e2';
-            b.style.borderColor = '#fca5a5';
-            b.style.color = '#dc3545';
-          }}
-          onMouseLeave={(e) => {
-            const b = e.currentTarget as HTMLButtonElement;
-            b.style.backgroundColor = '#f5f5f5';
-            b.style.borderColor = '#e0e0e0';
-            b.style.color = '#666666';
-          }}
-        >
-          <LogOut size={12} />
-          Logout
-        </button>
-
-        {/* Logo + name (takes remaining space) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '7px', flex: 1 }}>
-          <div
-            style={{
-              width: '26px',
-              height: '26px',
-              borderRadius: '7px',
-              backgroundColor: '#17a2b8',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 700,
-              fontSize: '13px',
-              color: '#fff',
-              flexShrink: 0,
-            }}
-          >
-            C
+            <button
+              onClick={signOut}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '5px',
+                padding: '5px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 500,
+                color: 'rgba(255,255,255,0.55)',
+                backgroundColor: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                cursor: 'pointer', transition: 'all 200ms ease',
+              }}
+              onMouseEnter={(e) => {
+                const b = e.currentTarget as HTMLButtonElement;
+                b.style.backgroundColor = 'rgba(229,62,62,0.12)';
+                b.style.borderColor = 'rgba(229,62,62,0.3)';
+                b.style.color = '#ff6b6b';
+              }}
+              onMouseLeave={(e) => {
+                const b = e.currentTarget as HTMLButtonElement;
+                b.style.backgroundColor = 'rgba(255,255,255,0.06)';
+                b.style.borderColor = 'rgba(255,255,255,0.1)';
+                b.style.color = 'rgba(255,255,255,0.55)';
+              }}
+            >
+              <LogOut size={12} />
+              Logout
+            </button>
           </div>
-          <span style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', letterSpacing: '-0.01em' }}>
-            CollabBoard
-          </span>
+
+          {/* Center: Board title */}
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{
+              fontSize: '14px', fontWeight: 700, color: '#ffffff',
+              letterSpacing: '-0.01em',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              maxWidth: '340px',
+            }}>
+              {boardTitle}
+            </span>
+          </div>
+
+          {/* Right: Sync + Presence */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 500 }}>
+              {isSyncing ? (
+                <>
+                  <Loader2 size={11} className="animate-spin" style={{ color: '#17c5c8' }} />
+                  <span style={{ color: '#17c5c8' }}>Syncing…</span>
+                </>
+              ) : syncStatus === 'connected' ? (
+                <>
+                  <Wifi size={11} style={{ color: '#28a745' }} />
+                  <span style={{ color: '#28a745' }}>Live</span>
+                </>
+              ) : (
+                <>
+                  <WifiOff size={11} style={{ color: 'rgba(255,255,255,0.4)' }} />
+                  <span style={{ color: 'rgba(255,255,255,0.4)' }}>Connecting…</span>
+                </>
+              )}
+            </div>
+
+            <OnlineDropdown />
+          </div>
+        </header>
+
+        {/* ── Canvas (white for drawing) ── */}
+        <div className="flex-1 overflow-hidden">
+          <Whiteboard />
         </div>
 
-        {/* Sync status */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 500, flexShrink: 0 }}>
-          {isSyncing ? (
-            <>
-              <Loader2 size={11} className="animate-spin" style={{ color: '#17a2b8' }} />
-              <span style={{ color: '#17a2b8' }}>Syncing…</span>
-            </>
-          ) : syncStatus === 'connected' ? (
-            <>
-              <Wifi size={11} style={{ color: '#28a745' }} />
-              <span style={{ color: '#28a745' }}>Live</span>
-            </>
-          ) : (
-            <>
-              <WifiOff size={11} style={{ color: '#999999' }} />
-              <span style={{ color: '#999999' }}>Connecting…</span>
-            </>
-          )}
-        </div>
-
-        {/* Online presence dropdown (right) */}
-        <OnlineDropdown />
-      </header>
-
-      {/* ── Canvas ─────────────────────────────────────────── */}
-      <div className="flex-1 overflow-hidden">
-        <Whiteboard />
+        {/* ── Toolbar ── */}
+        <Toolbar />
       </div>
-
-      {/* ── Toolbar (fixed at bottom) ───────────────────────── */}
-      <Toolbar />
-    </div>
     </CollabProvider>
   );
 }

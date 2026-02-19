@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils';
 // ── Separator used inside the dock ───────────────────────────────
 function DockSep() {
   return (
-    <div style={{ width: 1, height: 32, backgroundColor: 'rgba(0,0,0,0.1)', margin: '0 2px', flexShrink: 0, alignSelf: 'center' }} />
+    <div style={{ width: 1, height: 32, backgroundColor: 'rgba(255,255,255,0.1)', margin: '0 2px', flexShrink: 0, alignSelf: 'center' }} />
   );
 }
 
@@ -33,12 +33,12 @@ interface ToolDockIconProps {
 
 function ToolDockIcon({ icon, label, active, disabled, danger, color, onClick }: ToolDockIconProps) {
   const iconColor = active
-    ? '#17a2b8'
+    ? '#17c5c8'
     : danger
-    ? '#dc3545'
+    ? '#ff6b6b'
     : disabled
-    ? '#cccccc'
-    : color || '#1a1a1a';
+    ? 'rgba(255,255,255,0.2)'
+    : color || 'rgba(255,255,255,0.75)';
 
   return (
     <DockIcon
@@ -57,9 +57,9 @@ function ToolDockIcon({ icon, label, active, disabled, danger, color, onClick }:
         borderRadius: 8,
         padding: '3px 4px',
         backgroundColor: active
-          ? 'rgba(23,162,184,0.15)'
+          ? 'rgba(23,197,200,0.18)'
           : danger && !disabled
-          ? 'rgba(220,53,69,0.08)'
+          ? 'rgba(255,107,107,0.1)'
           : 'transparent',
       }}>
         <span style={{ color: iconColor, display: 'flex' }}>
@@ -67,7 +67,7 @@ function ToolDockIcon({ icon, label, active, disabled, danger, color, onClick }:
         </span>
         <span style={{
           width: 4, height: 4, borderRadius: '50%',
-          backgroundColor: active ? '#17a2b8' : 'transparent',
+          backgroundColor: active ? '#17c5c8' : 'transparent',
           flexShrink: 0,
         }} />
       </div>
@@ -99,9 +99,9 @@ function SaveDockIcon() {
       <div style={{
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
         borderRadius: 8, padding: '3px 4px',
-        backgroundColor: synced ? 'rgba(40,167,69,0.12)' : 'rgba(23,162,184,0.08)',
+        backgroundColor: synced ? 'rgba(40,167,69,0.18)' : 'rgba(23,197,200,0.12)',
       }}>
-        <span style={{ color: synced ? '#28a745' : '#17a2b8', display: 'flex' }}>
+        <span style={{ color: synced ? '#28a745' : '#17c5c8', display: 'flex' }}>
           {syncing ? <Loader2 size={17} className="animate-spin" /> : synced ? <Check size={17} /> : <Save size={17} />}
         </span>
         <span style={{ width: 4, height: 4, borderRadius: '50%', backgroundColor: 'transparent' }} />
@@ -157,7 +157,7 @@ export function Toolbar() {
         alignItems: 'center',
         gap: '4px',
         padding: '6px 14px 10px',
-        background: 'linear-gradient(to top, rgba(245,245,245,0.97) 70%, transparent)',
+        background: 'linear-gradient(to top, rgba(7,13,26,0.97) 70%, transparent)',
         pointerEvents: 'none',
       }}
     >
@@ -172,7 +172,7 @@ export function Toolbar() {
           iconSize={36}
           iconMagnification={54}
           iconDistance={110}
-          className="border-gray-200/80 bg-white/90 shadow-lg shadow-black/10 !mt-0 !h-auto py-2"
+          className="border-white/10 bg-[#0d1a2e]/95 shadow-lg shadow-black/40 !mt-0 !h-auto py-2"
         >
           {/* Zoom */}
           <ToolDockIcon icon={<ZoomOut size={16} />} label="Zoom out"
@@ -181,9 +181,9 @@ export function Toolbar() {
           <DockIcon
             title="Reset zoom (100%)"
             onClick={() => { setZoom(1); setPan(0, 0); }}
-            className="hover:bg-gray-100/80 transition-colors"
+            className="hover:bg-white/10 transition-colors"
           >
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#555', lineHeight: 1 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.65)', lineHeight: 1 }}>
               {pct}%
             </span>
           </DockIcon>
@@ -211,7 +211,7 @@ export function Toolbar() {
           <ToolDockIcon icon={<StickyNote size={17} />} label="Add sticky note"
             color="#f5a623" onClick={addStickyNote} />
           <ToolDockIcon icon={<Square size={17} />} label="Add rectangle"
-            color="#17a2b8" onClick={addRect} />
+            color="#17c5c8" onClick={addRect} />
           <ToolDockIcon icon={<Circle size={17} />} label="Add circle"
             color="#28a745" onClick={addCircle} />
 

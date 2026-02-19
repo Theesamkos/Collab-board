@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+/* ─── Tailwind v4 custom theme tokens ───────────────────────── */
+@theme {
+  --color-bg-primary:   #070d1a;
+  --color-bg-secondary: #0d1a2e;
+  --color-accent:       #17c5c8;
+  --color-accent-dim:   #17a2b8;
+  --color-danger:       #E53E3E;
+  --font-family-sans:   'Inter', system-ui, sans-serif;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -7,41 +17,42 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto',
+    'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #ffffff;
-  color: #1a1a1a;
+  background: linear-gradient(160deg, #070d1a 0%, #0d1a2e 50%, #0a1525 100%);
+  background-attachment: fixed;
+  min-height: 100vh;
+  color: #ffffff;
 }
 
-/* ─── Theme tokens (light only) ────────────────────────────── */
+/* ─── CSS vars ──────────────────────────────────────────────── */
 :root {
-  --bg-app:           #ffffff;
-  --bg-surface:       #ffffff;
-  --bg-elevated:      #f5f5f5;
-  --bg-input:         #ffffff;
-  --bg-canvas:        #f5f5f5;
-  --border:           #e0e0e0;
-  --border-focus:     #17a2b8;
-  --text-primary:     #1a1a1a;
-  --text-muted:       #666666;
-  --text-placeholder: #999999;
-  --shadow-sm:        0 1px 3px rgba(0,0,0,0.08);
-  --shadow-md:        0 2px 8px rgba(0,0,0,0.12);
-  --shadow-lg:        0 4px 16px rgba(0,0,0,0.15);
-  --shadow-toolbar:   0 -2px 8px rgba(0,0,0,0.08);
+  --bg-app:           #070d1a;
+  --bg-surface:       #0d1a2e;
+  --bg-elevated:      rgba(13,26,46,0.85);
+  --bg-input:         rgba(255,255,255,0.07);
+  --bg-canvas:        #f8f8f8;
+  --border:           rgba(23,197,200,0.2);
+  --border-focus:     #17c5c8;
+  --text-primary:     #ffffff;
+  --text-muted:       rgba(255,255,255,0.5);
+  --text-placeholder: rgba(255,255,255,0.3);
+  --shadow-sm:        0 1px 3px rgba(0,0,0,0.3);
+  --shadow-md:        0 4px 16px rgba(0,0,0,0.4);
+  --shadow-lg:        0 8px 32px rgba(0,0,0,0.5);
+  --shadow-toolbar:   0 -4px 16px rgba(0,0,0,0.4);
 
-  --color-primary:    #17a2b8;
+  --color-primary:    #17c5c8;
   --color-success:    #28a745;
   --color-secondary:  #6c757d;
-  --color-danger:     #dc3545;
+  --color-danger:     #E53E3E;
 }
 
 /* ─── Animations ────────────────────────────────────────────── */
 @keyframes fade-in-up {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
@@ -54,14 +65,23 @@ body {
   to { transform: rotate(360deg); }
 }
 
-/* ─── Utility classes ──────────────────────────────────────── */
-.fade-in-up {
-  animation: fade-in-up 200ms ease-out forwards;
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.96) translateY(10px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 
-/* Canvas grid background */
+/* ─── Utility classes ──────────────────────────────────────── */
+.fade-in-up {
+  animation: fade-in-up 220ms ease-out forwards;
+}
+
+.modal-in {
+  animation: modal-in 200ms ease-out forwards;
+}
+
+/* Canvas area (whiteboard stays light) */
 .canvas-bg {
-  background-color: var(--bg-canvas);
-  background-image: radial-gradient(circle, #e8e8e8 1px, transparent 1px);
+  background-color: #f8f8f8;
+  background-image: radial-gradient(circle, #e0e0e0 1px, transparent 1px);
   background-size: 28px 28px;
 }
