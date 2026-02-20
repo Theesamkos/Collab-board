@@ -26,7 +26,7 @@ export interface BoardObject {
   };
 }
 
-export type ActiveTool = 'select' | 'pan' | 'draw' | 'rect' | 'connector';
+export type ActiveTool = 'select' | 'pan' | 'draw' | 'rect' | 'connector' | 'frame';
 
 interface BoardState {
   boardId: string | null;
@@ -57,6 +57,7 @@ interface BoardState {
   cutSelection: () => void;
   pasteClipboard: () => void;
   duplicateSelection: () => void;
+  createFrameFromSelection: () => void;
   setPan: (x: number, y: number) => void;
   setZoom: (zoom: number) => void;
   setActiveTool: (tool: ActiveTool) => void;
@@ -266,6 +267,57 @@ export const useBoardStore = create<BoardState>()(
     set((state) => ({
       objects: [...state.objects, ...newObjects],
       selectedObjectIds: newObjects.map((o) => o.id),
+    }));
+    scheduleSyncDebounced(get);
+  },
+
+  createFrameFromSelection: () => {
+    const { selectedObjectIds, objects } = get();
+    if (selectedObjectIds.length === 0) return;
+
+    const selected = objects.filter(
+      (o) => selectedObjectIds.includes(o.id) && o.type !== 'connector',
+    );
+    if (selected.length === 0) return;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const obj of selected) {
+      let x1: number, y1: number, x2: number, y2: number;
+      if (obj.type === 'circle') {
+        const r = obj.width / 2;
+        x1 = obj.x - r; y1 = obj.y - r; x2 = obj.x + r; y2 = obj.y + r;
+      } else if (obj.type === 'line' && obj.points && obj.points.length >= 2) {
+        const xs = obj.points.filter((_, i) => i % 2 === 0);
+        const ys = obj.points.filter((_, i) => i % 2 !== 0);
+        x1 = Math.min(...xs); y1 = Math.min(...ys);
+        x2 = Math.max(...xs); y2 = Math.max(...ys);
+      } else {
+        x1 = obj.x; y1 = obj.y; x2 = obj.x + obj.width; y2 = obj.y + obj.height;
+      }
+      minX = Math.min(minX, x1); minY = Math.min(minY, y1);
+      maxX = Math.max(maxX, x2); maxY = Math.max(maxY, y2);
+    }
+
+    const PAD = 24;
+    const TITLE_SPACE = 28; // space above top edge for the label
+    const frameCount = objects.filter((o) => o.type === 'frame').length;
+    const newId = crypto.randomUUID();
+    const newFrame: BoardObject = {
+      id: newId,
+      type: 'frame',
+      x: minX - PAD,
+      y: minY - PAD - TITLE_SPACE,
+      width:  maxX - minX + PAD * 2,
+      height: maxY - minY + PAD * 2 + TITLE_SPACE,
+      text: `Frame ${frameCount + 1}`,
+      color: 'rgba(255,255,255,0.02)',
+      strokeColor: '#94a3b8',
+    };
+
+    // Insert frame before all other objects so it renders behind them
+    set((state) => ({
+      objects: [newFrame, ...state.objects],
+      selectedObjectIds: [newId],
     }));
     scheduleSyncDebounced(get);
   },

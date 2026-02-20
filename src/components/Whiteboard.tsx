@@ -31,6 +31,27 @@ function getConnectionPointCoords(
   }
 }
 
+// ── Frame containment test ────────────────────────────────────────
+// Returns true when obj's bounding box sits fully inside frame's bounds.
+function objectInsideFrame(obj: BoardObject, frame: BoardObject): boolean {
+  if (obj.id === frame.id || obj.type === 'connector') return false;
+  let ox: number, oy: number, oRight: number, oBottom: number;
+  if (obj.type === 'circle') {
+    const r = obj.width / 2;
+    ox = obj.x - r; oy = obj.y - r; oRight = obj.x + r; oBottom = obj.y + r;
+  } else if (obj.type === 'line') {
+    if (!obj.points || obj.points.length < 2) return false;
+    const xs = obj.points.filter((_, i) => i % 2 === 0);
+    const ys = obj.points.filter((_, i) => i % 2 !== 0);
+    ox = Math.min(...xs); oy = Math.min(...ys);
+    oRight = Math.max(...xs); oBottom = Math.max(...ys);
+  } else {
+    ox = obj.x; oy = obj.y; oRight = obj.x + obj.width; oBottom = obj.y + obj.height;
+  }
+  return ox >= frame.x && oy >= frame.y &&
+         oRight <= frame.x + frame.width && oBottom <= frame.y + frame.height;
+}
+
 // ── Marquee intersection test ─────────────────────────────────────
 type Box = { x: number; y: number; width: number; height: number };
 
@@ -78,8 +99,8 @@ export function Whiteboard() {
     objects, panX, panY, zoom,
     setPan, setZoom,
     addObject, updateObject, deleteObject, selectObject, setSelectedObjectIds, clearSelection,
-    activeTool, deleteSelectedObjects, selectedObjectIds,
-    copySelection, cutSelection, pasteClipboard, duplicateSelection,
+    activeTool, setActiveTool, deleteSelectedObjects, selectedObjectIds,
+    copySelection, cutSelection, pasteClipboard, duplicateSelection, createFrameFromSelection,
   } = useBoardStore();
 
   const [stageSize, setStageSize] = useState({ width: window.innerWidth, height: window.innerHeight });
@@ -128,6 +149,8 @@ export function Whiteboard() {
   const justFinishedResizeRef = useRef(false);
   const [liveResizeDims, setLiveResizeDims] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [resizeCursor, setResizeCursor] = useState<string | null>(null);
+  // Relative positions of objects contained inside a frame while it's dragged
+  const frameDragContentsRef = useRef<{ id: string; relX: number; relY: number }[]>([]);
 
   // ── Group-drag tracking ──────────────────────────────────────────
   // Start position of the object being dragged (canvas coords)
@@ -191,10 +214,11 @@ export function Whiteboard() {
       else if (e.key === 'x' || e.key === 'X') { e.preventDefault(); cutSelection(); }
       else if (e.key === 'v' || e.key === 'V') { e.preventDefault(); pasteClipboard(); }
       else if (e.key === 'd' || e.key === 'D') { e.preventDefault(); duplicateSelection(); }
+      else if ((e.key === 'g' || e.key === 'G') && e.shiftKey) { e.preventDefault(); createFrameFromSelection(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [copySelection, cutSelection, pasteClipboard, duplicateSelection]);
+  }, [copySelection, cutSelection, pasteClipboard, duplicateSelection, createFrameFromSelection]);
 
   const cursorStyle: Record<string, string> = {
     select:    'default',
@@ -202,6 +226,7 @@ export function Whiteboard() {
     draw:      'crosshair',
     rect:      'crosshair',
     connector: 'crosshair',
+    frame:     'crosshair',
   };
 
   const startEditing = (obj: BoardObject, e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -242,6 +267,30 @@ export function Whiteboard() {
     const containerRect = containerRef.current?.getBoundingClientRect();
     const offsetX = containerRect?.left ?? 0;
     const offsetY = containerRect?.top ?? 0;
+
+    // Frame: small title bar floating above the top edge
+    if (obj.type === 'frame') {
+      return {
+        position: 'fixed',
+        left:  offsetX + panX + obj.x * zoom + 8 * zoom,
+        top:   offsetY + panY + (obj.y - 24) * zoom,
+        width: Math.min(200 * zoom, obj.width * zoom - 16 * zoom),
+        height: 22 * zoom,
+        padding: `2px ${4 * zoom}px`,
+        fontSize: `${13 * zoom}px`,
+        fontWeight: 700,
+        lineHeight: '1.5',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        background: 'transparent',
+        border: '1px solid #17a2b8',
+        borderRadius: 4,
+        resize: 'none',
+        outline: 'none',
+        color: '#17a2b8',
+        zIndex: 1000,
+      };
+    }
+
     return {
       position: 'fixed',
       left: offsetX + panX + obj.x * zoom,
@@ -349,7 +398,7 @@ export function Whiteboard() {
       drawPointsRef.current = [pos.x, pos.y];
       setLivePoints([pos.x, pos.y]);
       setIsDrawing(true);
-    } else if (activeTool === 'rect') {
+    } else if (activeTool === 'rect' || activeTool === 'frame') {
       rectStartRef.current = pos;
       liveRectRef.current = null;
       setLiveRect(null);
@@ -448,7 +497,7 @@ export function Whiteboard() {
     } else if (activeTool === 'draw' && isDrawing) {
       drawPointsRef.current = [...drawPointsRef.current, pos.x, pos.y];
       setLivePoints([...drawPointsRef.current]);
-    } else if (activeTool === 'rect' && rectStartRef.current) {
+    } else if ((activeTool === 'rect' || activeTool === 'frame') && rectStartRef.current) {
       const start = rectStartRef.current;
       let w = pos.x - start.x;
       let h = pos.y - start.y;
@@ -532,6 +581,24 @@ export function Whiteboard() {
       if (r && r.width > 4 && r.height > 4) {
         addObject({ id: crypto.randomUUID(), type: 'rectangle', x: r.x, y: r.y, width: r.width, height: r.height, color: 'rgba(255,255,255,0.01)', strokeColor: '#1a1a1a' });
       }
+    } else if (activeTool === 'frame' && rectStartRef.current) {
+      const r = liveRectRef.current;
+      rectStartRef.current = null;
+      liveRectRef.current = null;
+      setLiveRect(null);
+      if (r && r.width > 10 && r.height > 10) {
+        const frameCount = objectsRef.current.filter((o) => o.type === 'frame').length;
+        const newId = crypto.randomUUID();
+        addObject({
+          id: newId, type: 'frame',
+          x: r.x, y: r.y, width: r.width, height: r.height,
+          text: `Frame ${frameCount + 1}`,
+          color: 'rgba(255,255,255,0.02)',
+          strokeColor: '#94a3b8',
+        });
+        setActiveTool('select');
+        setSelectedObjectIds([newId]);
+      }
     } else if (activeTool === 'connector' && connectorStartRef.current) {
       const start = connectorStartRef.current;
       const snap  = snapTargetRef.current;
@@ -550,7 +617,7 @@ export function Whiteboard() {
         });
       }
     }
-  }, [activeTool, isDrawing, addObject, setSelectedObjectIds, updateObject]);
+  }, [activeTool, isDrawing, addObject, setSelectedObjectIds, updateObject, setActiveTool]);
 
   // ── Connector rendering ───────────────────────────────────────────
   const renderConnector = (obj: BoardObject) => {
@@ -675,6 +742,61 @@ export function Whiteboard() {
     onDragEnd:  (e: Konva.KonvaEventObject<DragEvent>) => handleGroupDragEnd(obj.id, e.target.x(), e.target.y()),
   });
 
+  // Drag props for frames: moves all spatially-contained objects along with the frame.
+  const frameDragProps = (obj: BoardObject) => ({
+    onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => {
+      dragStartPosRef.current = { x: e.target.x(), y: e.target.y() };
+      // Capture contained objects only when dragging the frame solo
+      if (selectedObjectIdsRef.current.length === 1) {
+        const currentFrame = objectsRef.current.find((o) => o.id === obj.id) ?? obj;
+        frameDragContentsRef.current = objectsRef.current
+          .filter((o) => objectInsideFrame(o, currentFrame))
+          .map((o) => ({ id: o.id, relX: o.x - currentFrame.x, relY: o.y - currentFrame.y }));
+      } else {
+        frameDragContentsRef.current = [];
+      }
+    },
+    onDragMove: (e: Konva.KonvaEventObject<DragEvent>) => {
+      handleGroupDragMove(obj.id, e);
+      if (frameDragContentsRef.current.length > 0) {
+        const fx = e.target.x();
+        const fy = e.target.y();
+        for (const { id, relX, relY } of frameDragContentsRef.current) {
+          const node = stageRef.current?.findOne('#' + id) as Konva.Node | undefined;
+          if (node) { node.x(fx + relX); node.y(fy + relY); }
+        }
+      }
+    },
+    onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
+      const newX = e.target.x();
+      const newY = e.target.y();
+      if (frameDragContentsRef.current.length > 0) {
+        const contents = [...frameDragContentsRef.current];
+        frameDragContentsRef.current = [];
+        dragStartPosRef.current = null;
+        const preObjects = useBoardStore.getState().objects;
+        useBoardStore.temporal.getState().pause();
+        updateObject(obj.id, { x: newX, y: newY });
+        for (const { id, relX, relY } of contents) {
+          updateObject(id, { x: newX + relX, y: newY + relY });
+        }
+        useBoardStore.temporal.getState().resume();
+        const postObjects = useBoardStore.getState().objects;
+        if (postObjects !== preObjects) {
+          useBoardStore.temporal.setState((s) => ({
+            pastStates: [
+              ...(s.pastStates.length >= 100 ? s.pastStates.slice(1) : s.pastStates),
+              { objects: preObjects },
+            ],
+            futureStates: [],
+          }));
+        }
+      } else {
+        handleGroupDragEnd(obj.id, newX, newY);
+      }
+    },
+  });
+
   const renderObject = (obj: BoardObject) => {
     const isEditing  = obj.id === editingId;
     const isSelected = selectedObjectIds.includes(obj.id);
@@ -686,6 +808,35 @@ export function Whiteboard() {
     switch (obj.type) {
       case 'connector':
         return renderConnector(obj);
+
+      case 'frame':
+        return (
+          <Group
+            key={obj.id} id={obj.id}
+            x={effObj.x} y={effObj.y}
+            draggable={objectsDraggable}
+            onClick={(e) => { e.cancelBubble = true; selectObject(obj.id, shiftHeldRef.current); }}
+            onDblClick={(e) => startEditing(obj, e)}
+            {...frameDragProps(obj)}
+          >
+            <Rect
+              width={effObj.width} height={effObj.height}
+              fill={obj.color || 'rgba(255,255,255,0.02)'}
+              stroke={isSelected ? '#17a2b8' : (obj.strokeColor || '#94a3b8')}
+              strokeWidth={isSelected ? 2 : 1.5}
+              cornerRadius={6}
+              dash={isSelected ? undefined : [10, 6]}
+            />
+            {/* Title label rendered just above the top border */}
+            <Text
+              text={obj.text || 'Frame'}
+              x={10} y={-22}
+              fontSize={13} fontStyle="bold"
+              fill={isSelected ? '#17a2b8' : '#94a3b8'}
+              opacity={isEditing ? 0 : 1}
+            />
+          </Group>
+        );
 
       case 'sticky-note':
         return (
@@ -906,7 +1057,9 @@ export function Whiteboard() {
         onMouseUp={handleDrawMouseUp}
       >
         <Layer>
-          {objects.map((obj) => renderObject(obj))}
+          {/* Frames render first so they sit behind all other objects */}
+          {objects.filter((o) => o.type === 'frame').map((obj) => renderObject(obj))}
+          {objects.filter((o) => o.type !== 'frame').map((obj) => renderObject(obj))}
 
           {/* Freehand draw preview */}
           {isDrawing && livePoints.length >= 4 && (
@@ -914,10 +1067,12 @@ export function Whiteboard() {
               lineCap="round" lineJoin="round" tension={0.3} listening={false} />
           )}
 
-          {/* Rect-draw preview */}
+          {/* Rect / Frame draw preview */}
           {liveRect && (
             <Rect x={liveRect.x} y={liveRect.y} width={liveRect.width} height={liveRect.height}
-              fill="rgba(23,162,184,0.08)" stroke="#17a2b8" strokeWidth={1.5} dash={[6, 3]} listening={false} />
+              fill={activeTool === 'frame' ? 'rgba(148,163,184,0.06)' : 'rgba(23,162,184,0.08)'}
+              stroke={activeTool === 'frame' ? '#94a3b8' : '#17a2b8'}
+              strokeWidth={1.5} dash={[8, 4]} listening={false} />
           )}
 
           {/* Marquee selection box */}

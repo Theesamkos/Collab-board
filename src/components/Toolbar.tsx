@@ -4,7 +4,7 @@ import {
   Save, Check, Loader2,
   Pencil, Hand, MousePointer, Trash2,
   ZoomIn, ZoomOut, RotateCcw, Share2,
-  Undo2, Redo2,
+  Undo2, Redo2, Frame, Layers,
 } from 'lucide-react';
 import { useBoardStore, ActiveTool } from '../store/boardStore';
 import { useUndoRedo } from '../hooks/useUndoRedo';
@@ -117,6 +117,7 @@ export function Toolbar() {
     addObject,
     zoom, setZoom, setPan,
     selectedObjectIds, deleteSelectedObjects,
+    createFrameFromSelection,
   } = useBoardStore();
 
   const { undo, redo, canUndo, canRedo } = useUndoRedo();
@@ -200,6 +201,8 @@ export function Toolbar() {
             active={activeTool === 'rect'} onClick={() => setTool('rect')} />
           <ToolDockIcon icon={<Share2 size={17} />} label="Connector (connect objects)"
             active={activeTool === 'connector'} onClick={() => setTool('connector')} />
+          <ToolDockIcon icon={<Frame size={17} />} label="Frame (drag to create)"
+            active={activeTool === 'frame'} onClick={() => setTool('frame')} />
           <ToolDockIcon icon={<Hand size={17} />} label="Pan"
             active={activeTool === 'pan'} onClick={() => setTool('pan')} />
           <ToolDockIcon icon={<MousePointer size={17} />} label="Select"
@@ -214,6 +217,8 @@ export function Toolbar() {
             color="#17c5c8" onClick={addRect} />
           <ToolDockIcon icon={<Circle size={17} />} label="Add circle"
             color="#28a745" onClick={addCircle} />
+          <ToolDockIcon icon={<Layers size={17} />} label="Group as Frame (Cmd+Shift+G)"
+            color="#94a3b8" disabled={!has} onClick={createFrameFromSelection} />
 
           <DockSep />
 
