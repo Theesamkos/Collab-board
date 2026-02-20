@@ -322,10 +322,9 @@ class AICommandResponse(BaseModel):
     message: str | None = None
 
 
-# ── v2 Endpoint ───────────────────────────────────────────────────────────────
+# ── Shared handler ────────────────────────────────────────────────────────────
 
-@app.post("/api/v2/ai-command", response_model=AICommandResponse)
-async def ai_command_v2(body: AICommandRequest) -> AICommandResponse:
+async def run_ai_command(body: AICommandRequest) -> AICommandResponse:
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY environment variable not set")
@@ -355,6 +354,18 @@ async def ai_command_v2(body: AICommandRequest) -> AICommandResponse:
         tool_calls=tool_calls,
         message=str(response.content) if not tool_calls else None,
     )
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@app.post("/recognize-intent", response_model=AICommandResponse)
+async def recognize_intent(body: AICommandRequest) -> AICommandResponse:
+    return await run_ai_command(body)
+
+
+@app.post("/api/v2/ai-command", response_model=AICommandResponse)
+async def ai_command_v2(body: AICommandRequest) -> AICommandResponse:
+    return await run_ai_command(body)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
