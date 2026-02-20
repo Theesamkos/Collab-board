@@ -55,6 +55,20 @@ function objectIntersectsBox(obj: BoardObject, box: Box): boolean {
          obj.y < box.y + box.height && obj.y + obj.height > box.y;
 }
 
+// ── Resize-handle types ───────────────────────────────────────────
+type HandleType = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+interface ResizeStart {
+  handleType: HandleType;
+  mouseX: number; mouseY: number;
+  objX: number; objY: number;
+  objWidth: number; objHeight: number;
+}
+const HANDLE_CURSORS: Record<HandleType, string> = {
+  nw: 'nwse-resize', n: 'ns-resize',  ne: 'nesw-resize',
+  e:  'ew-resize',   se: 'nwse-resize', s: 'ns-resize',
+  sw: 'nesw-resize', w: 'ew-resize',
+};
+
 // ── Component ─────────────────────────────────────────────────────
 export function Whiteboard() {
   const stageRef = useRef<Konva.Stage>(null);
@@ -106,6 +120,14 @@ export function Whiteboard() {
   useEffect(() => { snapTargetRef.current = snapTarget; }, [snapTarget]);
   const selectedObjectIdsRef = useRef(selectedObjectIds);
   useEffect(() => { selectedObjectIdsRef.current = selectedObjectIds; }, [selectedObjectIds]);
+
+  // ── Resize-handle state ───────────────────────────────────────────
+  const resizingObjIdRef  = useRef<string | null>(null);
+  const resizeStartRef    = useRef<ResizeStart | null>(null);
+  const liveResizeDimsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const justFinishedResizeRef = useRef(false);
+  const [liveResizeDims, setLiveResizeDims] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [resizeCursor, setResizeCursor] = useState<string | null>(null);
 
   // ── Group-drag tracking ──────────────────────────────────────────
   // Start position of the object being dragged (canvas coords)
@@ -341,6 +363,76 @@ export function Whiteboard() {
     const pos = stage.getRelativePointerPosition();
     if (!pos) return;
 
+    // ── Resize handle drag ───────────────────────────────────────────
+    if (resizingObjIdRef.current !== null && resizeStartRef.current !== null) {
+      const rs = resizeStartRef.current;
+      const dx = pos.x - rs.mouseX;
+      const dy = pos.y - rs.mouseY;
+      const MIN = 20;
+      const obj = objectsRef.current.find((o) => o.id === resizingObjIdRef.current);
+      if (obj) {
+        let newX = rs.objX, newY = rs.objY, newW = rs.objWidth, newH = rs.objHeight;
+        if (obj.type === 'circle') {
+          const r0 = rs.objWidth / 2;
+          let delta: number;
+          switch (rs.handleType) {
+            case 'se': delta = (dx + dy) / 2; break;
+            case 'sw': delta = (-dx + dy) / 2; break;
+            case 'ne': delta = (dx - dy) / 2; break;
+            default:   delta = (-dx - dy) / 2; break; // nw
+          }
+          newW = Math.max(MIN, rs.objWidth + delta * 2);
+          newH = newW;
+          const newR = newW / 2;
+          switch (rs.handleType) {
+            case 'se': newX = rs.objX - r0 + newR; newY = rs.objY - r0 + newR; break;
+            case 'sw': newX = rs.objX + r0 - newR; newY = rs.objY - r0 + newR; break;
+            case 'ne': newX = rs.objX - r0 + newR; newY = rs.objY + r0 - newR; break;
+            default:   newX = rs.objX + r0 - newR; newY = rs.objY + r0 - newR; break; // nw
+          }
+        } else {
+          switch (rs.handleType) {
+            case 'nw':
+              newX = rs.objX + dx; newY = rs.objY + dy;
+              newW = Math.max(MIN, rs.objWidth - dx); newH = Math.max(MIN, rs.objHeight - dy);
+              if (newW === MIN) newX = rs.objX + rs.objWidth - MIN;
+              if (newH === MIN) newY = rs.objY + rs.objHeight - MIN;
+              break;
+            case 'n':
+              newY = rs.objY + dy; newH = Math.max(MIN, rs.objHeight - dy);
+              if (newH === MIN) newY = rs.objY + rs.objHeight - MIN;
+              break;
+            case 'ne':
+              newY = rs.objY + dy; newH = Math.max(MIN, rs.objHeight - dy);
+              newW = Math.max(MIN, rs.objWidth + dx);
+              if (newH === MIN) newY = rs.objY + rs.objHeight - MIN;
+              break;
+            case 'e':
+              newW = Math.max(MIN, rs.objWidth + dx);
+              break;
+            case 'se':
+              newW = Math.max(MIN, rs.objWidth + dx); newH = Math.max(MIN, rs.objHeight + dy);
+              break;
+            case 's':
+              newH = Math.max(MIN, rs.objHeight + dy);
+              break;
+            case 'sw':
+              newX = rs.objX + dx; newW = Math.max(MIN, rs.objWidth - dx); newH = Math.max(MIN, rs.objHeight + dy);
+              if (newW === MIN) newX = rs.objX + rs.objWidth - MIN;
+              break;
+            case 'w':
+              newX = rs.objX + dx; newW = Math.max(MIN, rs.objWidth - dx);
+              if (newW === MIN) newX = rs.objX + rs.objWidth - MIN;
+              break;
+          }
+        }
+        const dims = { x: newX, y: newY, width: newW, height: newH };
+        liveResizeDimsRef.current = dims;
+        setLiveResizeDims(dims);
+      }
+      return;
+    }
+
     if (activeTool === 'select' && selBoxStartRef.current) {
       const start = selBoxStartRef.current;
       const w = pos.x - start.x;
@@ -394,6 +486,20 @@ export function Whiteboard() {
   }, [activeTool, isDrawing]);
 
   const handleDrawMouseUp = useCallback(() => {
+    // ── Commit resize ────────────────────────────────────────────────
+    if (resizingObjIdRef.current !== null) {
+      const id   = resizingObjIdRef.current;
+      const dims = liveResizeDimsRef.current;
+      resizingObjIdRef.current  = null;
+      resizeStartRef.current    = null;
+      liveResizeDimsRef.current = null;
+      justFinishedResizeRef.current = true;
+      setLiveResizeDims(null);
+      setResizeCursor(null);
+      if (dims) updateObject(id, dims);
+      return;
+    }
+
     if (activeTool === 'select' && selBoxStartRef.current) {
       selBoxStartRef.current = null;
       const box = selBoxRef.current;
@@ -444,7 +550,7 @@ export function Whiteboard() {
         });
       }
     }
-  }, [activeTool, isDrawing, addObject, setSelectedObjectIds]);
+  }, [activeTool, isDrawing, addObject, setSelectedObjectIds, updateObject]);
 
   // ── Connector rendering ───────────────────────────────────────────
   const renderConnector = (obj: BoardObject) => {
@@ -572,6 +678,10 @@ export function Whiteboard() {
   const renderObject = (obj: BoardObject) => {
     const isEditing  = obj.id === editingId;
     const isSelected = selectedObjectIds.includes(obj.id);
+    // Merge live resize dimensions so the object tracks the handle in real-time
+    const effObj = (resizingObjIdRef.current === obj.id && liveResizeDims)
+      ? { ...obj, ...liveResizeDims }
+      : obj;
 
     switch (obj.type) {
       case 'connector':
@@ -582,7 +692,7 @@ export function Whiteboard() {
           <Group
             key={obj.id}
             id={obj.id}
-            x={obj.x} y={obj.y}
+            x={effObj.x} y={effObj.y}
             draggable={objectsDraggable && !isEditing}
             onClick={(e) => { e.cancelBubble = true; selectObject(obj.id, shiftHeldRef.current); }}
             onDblClick={(e) => startEditing(obj, e)}
@@ -590,7 +700,7 @@ export function Whiteboard() {
             {...connectorHoverProps(obj.id)}
           >
             <Rect
-              width={obj.width} height={obj.height}
+              width={effObj.width} height={effObj.height}
               fill={obj.color || '#FFFF00'}
               stroke={isSelected ? '#17a2b8' : 'rgba(0,0,0,0.15)'}
               strokeWidth={isSelected ? 2 : 1}
@@ -600,7 +710,7 @@ export function Whiteboard() {
               shadowOffsetX={2} shadowOffsetY={2}
             />
             <Text
-              text={obj.text || ''} width={obj.width} height={obj.height}
+              text={obj.text || ''} width={effObj.width} height={effObj.height}
               padding={10} fontSize={14} fill="#1a1a1a" wrap="word"
               opacity={isEditing ? 0 : 1}
             />
@@ -611,7 +721,7 @@ export function Whiteboard() {
         return (
           <Rect
             key={obj.id} id={obj.id}
-            x={obj.x} y={obj.y} width={obj.width} height={obj.height}
+            x={effObj.x} y={effObj.y} width={effObj.width} height={effObj.height}
             fill={obj.color || '#17a2b8'}
             stroke={isSelected ? '#17a2b8' : (obj.strokeColor || 'rgba(0,0,0,0.2)')}
             strokeWidth={isSelected ? 2.5 : (obj.strokeColor ? 2 : 1)}
@@ -626,7 +736,7 @@ export function Whiteboard() {
         return (
           <Circle
             key={obj.id} id={obj.id}
-            x={obj.x} y={obj.y} radius={obj.width / 2}
+            x={effObj.x} y={effObj.y} radius={effObj.width / 2}
             fill={obj.color || '#28a745'}
             stroke={isSelected ? '#dc3545' : 'rgba(0,0,0,0.2)'}
             strokeWidth={isSelected ? 2 : 1}
@@ -652,6 +762,91 @@ export function Whiteboard() {
       default:
         return null;
     }
+  };
+
+  // ── Resize handles ────────────────────────────────────────────────
+  const renderResizeHandles = () => {
+    if (selectedObjectIds.length !== 1 || activeTool !== 'select' || editingId !== null) return null;
+    const obj = objects.find((o) => o.id === selectedObjectIds[0]);
+    if (!obj || obj.type === 'connector' || obj.type === 'line') return null;
+
+    // Use live dims if a resize is in progress for this object
+    const effObj = (resizingObjIdRef.current === obj.id && liveResizeDims)
+      ? { ...obj, ...liveResizeDims }
+      : obj;
+
+    const isCircle = obj.type === 'circle';
+    const HS = 8 / zoom;   // handle size in canvas units → always 8 screen px
+    const SW = 1.5 / zoom; // handle stroke width in canvas units
+
+    // Bounding box top-left (circles store x/y as center)
+    const bx = isCircle ? effObj.x - effObj.width / 2 : effObj.x;
+    const by = isCircle ? effObj.y - effObj.width / 2 : effObj.y;
+    const bw = effObj.width;
+    const bh = isCircle ? effObj.width : effObj.height;
+
+    const handles: { type: HandleType; x: number; y: number }[] = isCircle
+      ? [
+          { type: 'nw', x: bx,           y: by      },
+          { type: 'ne', x: bx + bw,      y: by      },
+          { type: 'se', x: bx + bw,      y: by + bh },
+          { type: 'sw', x: bx,           y: by + bh },
+        ]
+      : [
+          { type: 'nw', x: bx,          y: by           },
+          { type: 'n',  x: bx + bw / 2, y: by           },
+          { type: 'ne', x: bx + bw,     y: by           },
+          { type: 'e',  x: bx + bw,     y: by + bh / 2  },
+          { type: 'se', x: bx + bw,     y: by + bh      },
+          { type: 's',  x: bx + bw / 2, y: by + bh      },
+          { type: 'sw', x: bx,          y: by + bh      },
+          { type: 'w',  x: bx,          y: by + bh / 2  },
+        ];
+
+    return (
+      <>
+        {/* Dashed selection bounding box */}
+        <Rect
+          x={bx} y={by} width={bw} height={bh}
+          fill="transparent"
+          stroke="#17a2b8"
+          strokeWidth={1 / zoom}
+          dash={[6 / zoom, 3 / zoom]}
+          listening={false}
+        />
+        {/* Handle squares */}
+        {handles.map(({ type, x, y }) => (
+          <Rect
+            key={`rh-${type}`}
+            x={x - HS / 2} y={y - HS / 2}
+            width={HS} height={HS}
+            fill="white"
+            stroke="#17a2b8"
+            strokeWidth={SW}
+            onMouseEnter={() => setResizeCursor(HANDLE_CURSORS[type])}
+            onMouseLeave={() => { if (!resizingObjIdRef.current) setResizeCursor(null); }}
+            onMouseDown={(e: Konva.KonvaEventObject<MouseEvent>) => {
+              e.cancelBubble = true;
+              const stage = stageRef.current;
+              if (!stage) return;
+              const pos = stage.getRelativePointerPosition();
+              if (!pos) return;
+              const start: ResizeStart = {
+                handleType: type,
+                mouseX: pos.x, mouseY: pos.y,
+                objX: effObj.x, objY: effObj.y,
+                objWidth: effObj.width, objHeight: effObj.height,
+              };
+              resizingObjIdRef.current  = obj.id;
+              resizeStartRef.current    = start;
+              liveResizeDimsRef.current = { x: effObj.x, y: effObj.y, width: effObj.width, height: effObj.height };
+              setLiveResizeDims({ x: effObj.x, y: effObj.y, width: effObj.width, height: effObj.height });
+              setResizeCursor(HANDLE_CURSORS[type]);
+            }}
+          />
+        ))}
+      </>
+    );
   };
 
   // ── Connector properties panel ────────────────────────────────────
@@ -689,7 +884,7 @@ export function Whiteboard() {
     <div
       ref={containerRef}
       className="canvas-bg"
-      style={{ position: 'relative', cursor: cursorStyle[activeTool] ?? 'default' }}
+      style={{ position: 'relative', cursor: resizeCursor ?? cursorStyle[activeTool] ?? 'default' }}
     >
       <Stage
         ref={stageRef}
@@ -700,7 +895,8 @@ export function Whiteboard() {
         onWheel={handleWheel}
         onDragEnd={stageDraggable ? handleDragEnd : undefined}
         onClick={() => {
-          // Suppress clear if a marquee selection just finished
+          // Suppress clear after a resize or marquee just finished
+          if (justFinishedResizeRef.current) { justFinishedResizeRef.current = false; return; }
           if (selBoxDraggedRef.current) { selBoxDraggedRef.current = false; return; }
           if (activeTool === 'select' || activeTool === 'connector') clearSelection();
         }}
@@ -736,6 +932,9 @@ export function Whiteboard() {
               fill="transparent" stroke="#17a2b8" strokeWidth={1} dash={[6, 4]}
               opacity={0.7} listening={false} />
           )}
+
+          {/* Resize handles for single selected object */}
+          {renderResizeHandles()}
 
           {/* Connector-tool: connection point indicators */}
           {activeTool === 'connector' && hoveredObjectId && renderConnectionPoints(hoveredObjectId)}
