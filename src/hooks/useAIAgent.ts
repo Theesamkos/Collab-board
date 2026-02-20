@@ -50,6 +50,7 @@ function resolveColor(raw: string | undefined, fallback: string): string {
 // All new camera/viewport tools are handled here.
 function executeToolCall(call: ToolCall): void {
   const { name, args } = call;
+  console.log('[useAIAgent] executing tool:', name, args);
   const store = useBoardStore.getState();
   const { addObject, updateObject, deleteObject, clearObjects, rearrangeObjects } = store;
 
@@ -228,6 +229,7 @@ export function useAIAgent() {
         });
 
         const data = await response.json();
+        console.log('[useAIAgent] response status:', response.status, '| body:', data);
 
         if (!response.ok) {
           throw new Error(data.error ?? data.detail ?? `Server error ${response.status}`);
@@ -251,11 +253,12 @@ export function useAIAgent() {
         // Small visual delay so the "Creating…" state is perceptible
         await new Promise<void>((res) => setTimeout(res, 80));
 
+        console.log('[useAIAgent] tool calls to execute:', toolCalls);
         for (const call of toolCalls) {
           try {
             executeToolCall(call);
           } catch (err) {
-            console.warn(`[useAIAgent] tool "${call.name}" failed:`, err);
+            console.error(`[useAIAgent] tool "${call.name}" threw:`, err);
           }
         }
 
