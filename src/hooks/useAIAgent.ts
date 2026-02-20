@@ -4,12 +4,9 @@
  * Sends every command to ONE endpoint and executes the returned tool calls
  * against the Zustand board store.
  *
- * Endpoint resolution (in priority order):
- *   1. VITE_AI_SERVICE_URL  (Railway always-on backend) → /api/v2/ai-command
- *   2. /api/ai-command      (Vite dev plugin / Vercel function fallback)
- *
- * Set VITE_AI_SERVICE_URL=https://<your-railway-url>.railway.app in .env.local
- * to use the Railway backend.  Leave it unset to use the built-in fallback.
+ * Endpoint resolution:
+ *   VITE_AI_BACKEND_URL (env) → Railway always-on backend → /api/v2/ai-command
+ *   Default: https://collab-board-backend-production-d852.up.railway.app
  */
 
 import { useState, useCallback } from 'react';
@@ -26,12 +23,9 @@ interface ToolCall {
 }
 
 // ── Endpoint resolution ───────────────────────────────────────────────────────
-// VITE_AI_SERVICE_URL → Railway backend (always-on, no cold starts)
-// fallback           → Vite dev-server plugin or Vercel function
-const AI_BASE = import.meta.env.VITE_AI_SERVICE_URL as string | undefined;
-const AI_ENDPOINT = AI_BASE
-  ? `${AI_BASE.replace(/\/$/, '')}/api/v2/ai-command`
-  : '/api/ai-command';
+const BACKEND_URL = (import.meta.env.VITE_AI_BACKEND_URL as string | undefined)
+  || 'https://collab-board-backend-production-d852.up.railway.app';
+const AI_ENDPOINT = `${BACKEND_URL.replace(/\/$/, '')}/api/v2/ai-command`;
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
 const COLOR_MAP: Record<string, string> = {
