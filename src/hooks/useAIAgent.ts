@@ -104,6 +104,7 @@ function executeToolCall(call: ToolCall): void {
       if (args.objectId) deleteObject(args.objectId as string);
       break;
 
+    case 'updateText':
     case 'updateStickyNote': {
       if (!args.objectId) break;
       const updates: Record<string, unknown> = {};

@@ -133,16 +133,15 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "updateStickyNote",
-            "description": "Update the text or color of an existing sticky note.",
+            "name": "updateText",
+            "description": "Update the text content of an existing sticky note.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "objectId": {"type": "string", "description": "ID of the sticky note."},
                     "text":     {"type": "string", "description": "New text content."},
-                    "color":    {"type": "string", "description": "New background color."},
                 },
-                "required": ["objectId"],
+                "required": ["objectId", "text"],
             },
         },
     },
@@ -295,7 +294,7 @@ lime=#84CC16    indigo=#6366F1 coral=#F87171  emerald=#10B981
 - For "center the board" / "fit to view" / "show everything": use fitToView.
 - For camera/zoom/pan commands: use setZoom or panView.
 - For "reset" (view): use resetView.
-- Prefer updateStickyNote over delete+create when editing existing text.
+- Prefer updateText over delete+create when editing existing text content.
 - For "clear the board"/"delete everything": use clearBoard (one call only).
 - NEVER invent objectIds. Only use IDs present in the board state below.
 - When "selected" objects are mentioned, operate on objects where selected=true,
@@ -318,7 +317,7 @@ class ToolCallResult(BaseModel):
 
 
 class AICommandResponse(BaseModel):
-    success: bool
+    handler: str = "langchain"
     tool_calls: list[ToolCallResult]
     message: str | None = None
 
@@ -352,7 +351,7 @@ async def ai_command_v2(body: AICommandRequest) -> AICommandResponse:
     ]
 
     return AICommandResponse(
-        success=True,
+        handler="langchain",
         tool_calls=tool_calls,
         message=str(response.content) if not tool_calls else None,
     )
