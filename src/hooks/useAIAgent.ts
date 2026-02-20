@@ -1,12 +1,11 @@
 /**
- * useAIAgent v2 — single-layer AI routing hook
+ * useAIAgent v3 — single-layer AI routing hook
  *
- * Sends every command to ONE endpoint and executes the returned tool calls
- * against the Zustand board store.
+ * Sends every command to ONE endpoint with board state and executes
+ * the returned tool calls against the Zustand board store.
  *
- * Endpoint resolution:
- *   VITE_AI_BACKEND_URL (env) → Railway always-on backend → /api/v2/ai-command
- *   Default: https://collab-board-backend-production-d852.up.railway.app
+ * v3 adds: updateObject, deleteObjects, alignObjects,
+ *          distributeObjects, createTemplate
  */
 
 import { useState, useCallback } from 'react';
@@ -45,9 +44,64 @@ function resolveColor(raw: string | undefined, fallback: string): string {
   return COLOR_MAP[raw.toLowerCase()] ?? fallback;
 }
 
+// ── Template definitions ──────────────────────────────────────────────────────
+function createTemplate(templateType: string, startX: number, startY: number): void {
+  const store = useBoardStore.getState();
+  const { addObject } = store;
+
+  switch (templateType) {
+    case 'swot': {
+      // Title + 4 quadrant rectangles
+      addObject({ id: uuidv4(), type: 'sticky-note', x: startX + 190, y: startY, width: 240, height: 44, text: 'SWOT Analysis', color: '#1F2937' });
+      addObject({ id: uuidv4(), type: 'rectangle',   x: startX,       y: startY + 60, width: 210, height: 160, text: 'Strengths',     color: '#22C55E' });
+      addObject({ id: uuidv4(), type: 'rectangle',   x: startX + 220, y: startY + 60, width: 210, height: 160, text: 'Weaknesses',    color: '#EF4444' });
+      addObject({ id: uuidv4(), type: 'rectangle',   x: startX,       y: startY + 230, width: 210, height: 160, text: 'Opportunities', color: '#3B82F6' });
+      addObject({ id: uuidv4(), type: 'rectangle',   x: startX + 220, y: startY + 230, width: 210, height: 160, text: 'Threats',       color: '#F97316' });
+      break;
+    }
+
+    case 'kanban': {
+      const cols = [
+        { label: 'To Do',       color: '#EF4444' },
+        { label: 'In Progress', color: '#F97316' },
+        { label: 'Done',        color: '#22C55E' },
+      ];
+      cols.forEach(({ label, color }, i) => {
+        addObject({ id: uuidv4(), type: 'rectangle',  x: startX + i * 220, y: startY,      width: 200, height: 46,  text: label, color });
+        addObject({ id: uuidv4(), type: 'sticky-note', x: startX + i * 220, y: startY + 60, width: 200, height: 110, text: '+ Add card', color: '#FFDD57' });
+      });
+      break;
+    }
+
+    case 'userJourney': {
+      const stages = ['Awareness', 'Consideration', 'Purchase', 'Retention', 'Advocacy'];
+      const colors  = ['#3B82F6',  '#8B5CF6',       '#22C55E', '#F97316',   '#EC4899'];
+      stages.forEach((stage, i) => {
+        addObject({ id: uuidv4(), type: 'sticky-note', x: startX + i * 210, y: startY, width: 190, height: 110, text: stage, color: colors[i] });
+      });
+      break;
+    }
+
+    case 'decisionMatrix': {
+      const quadrants = [
+        { label: 'Do First\n(Urgent + Important)',     color: '#22C55E', dx: 0,   dy: 0 },
+        { label: 'Schedule\n(Important, Not Urgent)',  color: '#3B82F6', dx: 220, dy: 0 },
+        { label: 'Delegate\n(Urgent, Not Important)',  color: '#F97316', dx: 0,   dy: 180 },
+        { label: 'Eliminate\n(Not Urgent, Not Important)', color: '#EF4444', dx: 220, dy: 180 },
+      ];
+      addObject({ id: uuidv4(), type: 'sticky-note', x: startX + 170, y: startY, width: 280, height: 40, text: 'Decision Matrix', color: '#1F2937' });
+      quadrants.forEach(({ label, color, dx, dy }) => {
+        addObject({ id: uuidv4(), type: 'rectangle', x: startX + dx, y: startY + 50 + dy, width: 200, height: 160, text: label, color });
+      });
+      break;
+    }
+
+    default:
+      console.warn('[useAIAgent] Unknown template type:', templateType);
+  }
+}
+
 // ── Tool executor ─────────────────────────────────────────────────────────────
-// Executes a single tool call against the Zustand board store.
-// All new camera/viewport tools are handled here.
 function executeToolCall(call: ToolCall): void {
   const { name, args } = call;
   console.log('[useAIAgent] executing tool:', name, args);
@@ -76,6 +130,7 @@ function executeToolCall(call: ToolCall): void {
         width:  typeof args.width  === 'number' ? args.width  : 200,
         height: typeof args.height === 'number' ? args.height : 140,
         color: resolveColor(args.color as string | undefined, '#3B82F6'),
+        ...(typeof args.text === 'string' && args.text ? { text: args.text } : {}),
       });
       break;
 
@@ -92,15 +147,33 @@ function executeToolCall(call: ToolCall): void {
     }
 
     // ── Object manipulation ─────────────────────────────────────────────────
+    case 'updateObject': {
+      if (!args.objectId) break;
+      const updates: Record<string, unknown> = {};
+      if (typeof args.color  === 'string') updates.color  = resolveColor(args.color, '');
+      if (typeof args.text   === 'string') updates.text   = args.text;
+      if (typeof args.x      === 'number') updates.x      = args.x;
+      if (typeof args.y      === 'number') updates.y      = args.y;
+      if (typeof args.width  === 'number') updates.width  = args.width;
+      if (typeof args.height === 'number') updates.height = args.height;
+      if (Object.keys(updates).length > 0) updateObject(args.objectId as string, updates);
+      break;
+    }
+
     case 'moveObject':
       if (args.objectId) {
-        updateObject(args.objectId as string, {
-          x: args.x as number,
-          y: args.y as number,
-        });
+        updateObject(args.objectId as string, { x: args.x as number, y: args.y as number });
       }
       break;
 
+    case 'deleteObjects': {
+      const ids = args.objectIds as string[] | undefined;
+      if (!ids || ids.length === 0) break;
+      for (const id of ids) deleteObject(id);
+      break;
+    }
+
+    // Legacy single-delete (keep for backward compat)
     case 'deleteObject':
       if (args.objectId) deleteObject(args.objectId as string);
       break;
@@ -142,6 +215,81 @@ function executeToolCall(call: ToolCall): void {
       break;
     }
 
+    case 'alignObjects': {
+      const alignment = args.alignment as string;
+      const allObjs = useBoardStore.getState().objects;
+      const rawIds  = args.objectIds as string[] | undefined;
+      const targetObjs = rawIds && rawIds.length > 0
+        ? allObjs.filter((o) => rawIds.includes(o.id) && o.type !== 'connector' && o.type !== 'line')
+        : allObjs.filter((o) => o.type !== 'connector' && o.type !== 'line');
+
+      if (targetObjs.length < 2) break;
+
+      // Compute reference value for the chosen edge
+      let refLeft   = Math.min(...targetObjs.map((o) => o.x));
+      let refRight  = Math.max(...targetObjs.map((o) => o.x + o.width));
+      let refTop    = Math.min(...targetObjs.map((o) => o.y));
+      let refBottom = Math.max(...targetObjs.map((o) => o.y + o.height));
+      let refCX     = targetObjs.reduce((s, o) => s + o.x + o.width  / 2, 0) / targetObjs.length;
+      let refCY     = targetObjs.reduce((s, o) => s + o.y + o.height / 2, 0) / targetObjs.length;
+
+      rearrangeObjects(targetObjs.map((o) => {
+        let newX = o.x, newY = o.y;
+        switch (alignment) {
+          case 'left':     newX = refLeft;                  break;
+          case 'right':    newX = refRight  - o.width;      break;
+          case 'top':      newY = refTop;                   break;
+          case 'bottom':   newY = refBottom - o.height;     break;
+          case 'center-x': newX = refCX - o.width  / 2;    break;
+          case 'center-y': newY = refCY - o.height / 2;    break;
+        }
+        return { id: o.id, x: newX, y: newY };
+      }));
+      break;
+    }
+
+    case 'distributeObjects': {
+      const direction = args.direction as string;
+      const allObjs   = useBoardStore.getState().objects;
+      const rawIds    = args.objectIds as string[] | undefined;
+      const targets   = rawIds && rawIds.length > 0
+        ? allObjs.filter((o) => rawIds.includes(o.id) && o.type !== 'connector' && o.type !== 'line')
+        : allObjs.filter((o) => o.type !== 'connector' && o.type !== 'line');
+
+      if (targets.length < 3) break;
+
+      if (direction === 'horizontal') {
+        const sorted = [...targets].sort((a, b) => a.x - b.x);
+        const totalW = sorted.reduce((s, o) => s + o.width, 0);
+        const span   = sorted[sorted.length - 1].x + sorted[sorted.length - 1].width - sorted[0].x;
+        const gap    = (span - totalW) / (sorted.length - 1);
+        let cur = sorted[0].x;
+        rearrangeObjects(sorted.map((o) => {
+          const x = cur; cur += o.width + gap;
+          return { id: o.id, x, y: o.y };
+        }));
+      } else {
+        const sorted = [...targets].sort((a, b) => a.y - b.y);
+        const totalH = sorted.reduce((s, o) => s + o.height, 0);
+        const span   = sorted[sorted.length - 1].y + sorted[sorted.length - 1].height - sorted[0].y;
+        const gap    = (span - totalH) / (sorted.length - 1);
+        let cur = sorted[0].y;
+        rearrangeObjects(sorted.map((o) => {
+          const y = cur; cur += o.height + gap;
+          return { id: o.id, x: o.x, y };
+        }));
+      }
+      break;
+    }
+
+    case 'createTemplate': {
+      const templateType = args.templateType as string;
+      const x = typeof args.x === 'number' ? args.x : 80;
+      const y = typeof args.y === 'number' ? args.y : 80;
+      createTemplate(templateType, x, y);
+      break;
+    }
+
     // ── Camera / viewport ───────────────────────────────────────────────────
     case 'setZoom': {
       const current = useBoardStore.getState().zoom;
@@ -174,7 +322,6 @@ function executeToolCall(call: ToolCall): void {
       const { objects } = useBoardStore.getState();
       if (objects.length === 0) { store.setZoom(1); store.setPan(0, 0); break; }
 
-      // Calculate bounding box of all objects
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const obj of objects) {
         minX = Math.min(minX, obj.x);
@@ -183,12 +330,10 @@ function executeToolCall(call: ToolCall): void {
         maxY = Math.max(maxY, obj.y + (obj.height ?? 0));
       }
 
-      const contentW = maxX - minX + 80;  // 40px padding each side
+      const contentW = maxX - minX + 80;
       const contentH = maxY - minY + 80;
-      // Account for header (~48px) and toolbar (~90px)
       const viewW = window.innerWidth  - 40;
       const viewH = window.innerHeight - 150;
-
       const newZoom = Math.max(0.25, Math.min(2, Math.min(viewW / contentW, viewH / contentH)));
       const newPanX = viewW / 2 - (minX + contentW / 2 - 40) * newZoom;
       const newPanY = viewH / 2 - (minY + contentH / 2 - 40) * newZoom;
@@ -208,7 +353,7 @@ export function useAIAgent() {
   const [phase, setPhase]           = useState<AIPhase>('idle');
   const [errorMessage, setErrorMsg] = useState('');
 
-  const { boardId, objects } = useBoardStore();
+  const { boardId, objects, selectedObjectIds } = useBoardStore();
 
   const processCommand = useCallback(
     async (command: string) => {
@@ -219,13 +364,26 @@ export function useAIAgent() {
       setErrorMsg('');
 
       try {
-        // ── Single AI call ──────────────────────────────────────────────────
-        // Calls the Railway backend (VITE_AI_SERVICE_URL) when configured,
-        // or falls back to the Vercel / Vite-dev-plugin route.
+        // Build minimal board state to send — gives Claude context for manipulation commands.
+        // Only include non-connector/non-line objects; round floats to save tokens.
+        const boardState = objects
+          .filter((o) => o.type !== 'connector' && o.type !== 'line')
+          .map((o) => ({
+            id: o.id,
+            type: o.type,
+            x: Math.round(o.x),
+            y: Math.round(o.y),
+            width:  Math.round(o.width),
+            height: Math.round(o.height),
+            ...(o.color ? { color: o.color } : {}),
+            ...(o.text  ? { text: o.text.slice(0, 60) } : {}),
+            ...(selectedObjectIds.includes(o.id) ? { selected: true } : {}),
+          }));
+
         const response = await fetch(AI_ENDPOINT, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ command: cmd }),
+          body: JSON.stringify({ command: cmd, board_state: boardState }),
         });
 
         const data = await response.json();
@@ -235,7 +393,6 @@ export function useAIAgent() {
           throw new Error(data.error ?? data.detail ?? `Server error ${response.status}`);
         }
 
-        // Railway returns data.tool_calls; Vercel function returns data.toolCalls
         const toolCalls: ToolCall[] = (data.tool_calls ?? data.toolCalls ?? []).map(
           (tc: { name: string; args?: Record<string, unknown> }) => ({
             name: tc.name,
@@ -250,8 +407,7 @@ export function useAIAgent() {
         }
 
         setPhase('creating');
-        // Small visual delay so the "Creating…" state is perceptible
-        await new Promise<void>((res) => setTimeout(res, 80));
+        await new Promise<void>((res) => setTimeout(res, 60));
 
         console.log('[useAIAgent] tool calls to execute:', toolCalls);
         for (const call of toolCalls) {
@@ -272,7 +428,7 @@ export function useAIAgent() {
         setTimeout(() => setPhase('idle'), 4_000);
       }
     },
-    [boardId, objects],
+    [boardId, objects, selectedObjectIds],
   );
 
   return { processCommand, phase, errorMessage };

@@ -6,7 +6,7 @@ import { useAIAgent, AIPhase } from '../hooks/useAIAgent';
 const STATUS_CONFIG: Record<AIPhase, { color: string; text: string }> = {
   idle:     { color: '#999999', text: '' },
   thinking: { color: '#17c5c8', text: 'Thinking…' },
-  creating: { color: '#6c757d', text: 'Creating…' },
+  creating: { color: '#17c5c8', text: 'Applying changes…' },
   done:     { color: '#28a745', text: 'Done!' },
   error:    { color: '#ff6b6b', text: '' },
 };
@@ -24,15 +24,15 @@ export function AICommandInput() {
   const cfg        = STATUS_CONFIG[phase];
   const statusText = phase === 'error' ? errorMessage : cfg.text;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSend) return;
 
     const cmd = command.trim();
     setCommand('');
-
-    await processCommand(cmd);
-    // phase auto-resets to 'idle' inside the hook after 2.2 s / 4 s
+    // Fire-and-forget: processCommand sets phase='thinking' synchronously,
+    // so the spinner appears on the very next frame without awaiting.
+    processCommand(cmd);
     inputRef.current?.focus();
   };
 
