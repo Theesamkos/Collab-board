@@ -1,389 +1,360 @@
 """
-Intent Recognition Microservice
---------------------------------
-A lightweight FastAPI service that uses rule-based regex matching to parse
-simple whiteboard commands. Recognized commands are handled locally and
-returned immediately. Unrecognized commands are flagged for forwarding to
-claude-sonnet-4-6 via the LangChain layer.
+CollabBoard AI Service v2
+--------------------------
+Single-layer AI endpoint powered by claude-sonnet-4-6 via LangChain.
+
+Eliminates the brittle regex layer in favour of a single, robust
+/api/v2/ai-command endpoint that understands the full range of natural
+language whiteboard commands and returns precise tool calls for the
+frontend to execute.
+
+LangSmith tracing is enabled automatically when the environment provides:
+  LANGCHAIN_TRACING_V2=true
+  LANGCHAIN_API_KEY=<langsmith key>
+  LANGCHAIN_PROJECT=collab-board
 """
 
 from __future__ import annotations
 
-import re
+import os
 from typing import Any
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="Intent Recognition Microservice",
-    description="Rule-based intent parser for common whiteboard commands.",
-    version="1.0.0",
+    title="CollabBoard AI Service",
+    description="claude-sonnet-4-6 powered whiteboard command interpreter.",
+    version="2.0.0",
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["POST"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
+# ── Tool definitions (OpenAI format; LangChain converts to Anthropic) ─────────
+
+TOOLS: list[dict[str, Any]] = [
+    # ── Shape creation ────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "createStickyNote",
+            "description": "Create a sticky note on the whiteboard. Use for notes, labels, text items.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text":   {"type": "string",  "description": "Text content of the note."},
+                    "x":      {"type": "number",  "description": "Left edge X position (0–1000)."},
+                    "y":      {"type": "number",  "description": "Top edge Y position (0–700)."},
+                    "color":  {"type": "string",  "description": "Background color: hex or name."},
+                    "width":  {"type": "number",  "description": "Width in pixels (default 200)."},
+                    "height": {"type": "number",  "description": "Height in pixels (default 150)."},
+                },
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "createRectangle",
+            "description": "Create a rectangle or square shape on the whiteboard.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x":      {"type": "number", "description": "Left edge X position."},
+                    "y":      {"type": "number", "description": "Top edge Y position."},
+                    "width":  {"type": "number", "description": "Width in pixels (default 200)."},
+                    "height": {"type": "number", "description": "Height in pixels (default 140)."},
+                    "color":  {"type": "string", "description": "Fill color: hex or name."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "createCircle",
+            "description": "Create a circle or ellipse shape on the whiteboard.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x":      {"type": "number", "description": "Center X position."},
+                    "y":      {"type": "number", "description": "Center Y position."},
+                    "radius": {"type": "number", "description": "Radius in pixels (default 60)."},
+                    "color":  {"type": "string", "description": "Fill color: hex or name."},
+                },
+                "required": [],
+            },
+        },
+    },
+    # ── Object manipulation ───────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "moveObject",
+            "description": "Move an existing object to new absolute coordinates.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "objectId": {"type": "string", "description": "ID of the object to move."},
+                    "x":        {"type": "number", "description": "New X position."},
+                    "y":        {"type": "number", "description": "New Y position."},
+                },
+                "required": ["objectId", "x", "y"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "deleteObject",
+            "description": "Delete a specific object by its ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "objectId": {"type": "string", "description": "ID of the object to delete."},
+                },
+                "required": ["objectId"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "updateStickyNote",
+            "description": "Update the text or color of an existing sticky note.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "objectId": {"type": "string", "description": "ID of the sticky note."},
+                    "text":     {"type": "string", "description": "New text content."},
+                    "color":    {"type": "string", "description": "New background color."},
+                },
+                "required": ["objectId"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "changeColor",
+            "description": "Change the fill color of any object (shape or sticky note).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "objectId": {"type": "string", "description": "ID of the object."},
+                    "color":    {"type": "string", "description": "New color: hex or name."},
+                },
+                "required": ["objectId", "color"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "clearBoard",
+            "description": "Remove ALL objects from the board. Use only when the user explicitly asks to clear everything.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    # ── Layout ────────────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "arrangeInGrid",
+            "description": "Rearrange all objects on the board into a neat grid layout.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "columns": {"type": "number", "description": "Number of grid columns (default 3)."},
+                    "spacing": {"type": "number", "description": "Pixel gap between objects (default 240)."},
+                },
+                "required": [],
+            },
+        },
+    },
+    # ── Camera / viewport ─────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "setZoom",
+            "description": "Control the board zoom level.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["in", "out", "reset", "set"],
+                        "description": "'in'=zoom in 25%, 'out'=zoom out 25%, 'reset'=100% + center, 'set'=exact level.",
+                    },
+                    "level": {
+                        "type": "number",
+                        "description": "Zoom multiplier for action='set' (e.g. 2.0 = 200%). Range: 0.25–4.0.",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "panView",
+            "description": "Pan (scroll) the board viewport in a direction.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "direction": {
+                        "type": "string",
+                        "enum": ["left", "right", "up", "down"],
+                        "description": "Direction to pan.",
+                    },
+                    "amount": {
+                        "type": "number",
+                        "description": "Distance to pan in pixels (default 200).",
+                    },
+                },
+                "required": ["direction"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fitToView",
+            "description": "Zoom and pan to fit all objects on the board into the visible viewport. Use for 'show me everything', 'zoom to fit', 'fit all'.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resetView",
+            "description": "Reset viewport to default position: 100% zoom, centered at origin.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+]
+
+# ── System prompt factory ─────────────────────────────────────────────────────
+
+def build_system_prompt(board_state: list[dict]) -> str:
+    return f"""You are an AI assistant for CollabBoard, a real-time collaborative whiteboard.
+Your job is to translate natural language commands into precise tool calls.
+Always call tools — never just describe what you would do.
+
+═══ CANVAS ════════════════════════════════════════════════════════════════════
+The canvas is approximately 1200×800 pixels.
+
+POSITIONING GUIDE (use these as starting coordinates):
+  top-left:     x≈80,  y≈80
+  top-center:   x≈550, y≈80
+  top-right:    x≈900, y≈80
+  center-left:  x≈80,  y≈300
+  center:       x≈550, y≈300
+  center-right: x≈900, y≈300
+  bottom-left:  x≈80,  y≈500
+  bottom-center:x≈550, y≈500
+  bottom-right: x≈900, y≈500
+
+SPACING:
+  "in a row" (horizontal): add 220–240px to x for each successive object
+  "in a column" (vertical): add 170–190px to y for each successive object
+  "evenly spaced": distribute across the canvas with equal gaps
+  Avoid placing objects at the exact same (x, y) — offset each by at least 220px
+
+═══ COLORS ════════════════════════════════════════════════════════════════════
+yellow=#FFDD57  red=#EF4444    blue=#3B82F6   green=#22C55E
+purple=#8B5CF6  orange=#F97316 pink=#EC4899   teal=#14B8A6
+white=#F8FAFC   black=#1F2937  gray=#6B7280   gold=#F59E0B
+lime=#84CC16    indigo=#6366F1 coral=#F87171  emerald=#10B981
+
+═══ DEFAULT SIZES ═════════════════════════════════════════════════════════════
+  sticky note : 200×150px  (color: yellow #FFDD57)
+  rectangle   : 200×140px  (color: blue #3B82F6)
+  circle      : radius 60px → 120×120px  (color: green #22C55E)
+  "large"     : multiply default by 1.5
+  "small"     : multiply default by 0.6
+
+═══ RULES ═════════════════════════════════════════════════════════════════════
+- Emit MULTIPLE tool calls in a single response when creating several objects.
+- For "3 blue squares in a row": emit 3 × createRectangle with x spacing 220px.
+- For "arrange in grid" / "grid layout": use arrangeInGrid.
+- For "center the board" / "fit to view" / "show everything": use fitToView.
+- For camera/zoom/pan commands: use setZoom or panView.
+- For "reset" (view): use resetView.
+- Prefer updateStickyNote over delete+create when editing existing text.
+- For "clear the board"/"delete everything": use clearBoard (one call only).
+- NEVER invent objectIds. Only use IDs present in the board state below.
+- When "selected" objects are mentioned, operate on objects where selected=true,
+  or on all objects if none are explicitly selected in the board state.
+
+═══ BOARD STATE ═══════════════════════════════════════════════════════════════
+{board_state if board_state else "[]"}
+"""
+
 # ── Pydantic models ───────────────────────────────────────────────────────────
 
-class RecognizeRequest(BaseModel):
+class AICommandRequest(BaseModel):
     command: str
+    board_state: list[dict] = []
 
 
-class RecognizeResponse(BaseModel):
-    intent: str
-    entities: dict[str, Any]
-    confidence: float
-    handler: str  # "local" | "forward_to_langchain"
+class ToolCallResult(BaseModel):
+    name: str
+    args: dict[str, Any]
 
 
-# ── Compiled patterns ─────────────────────────────────────────────────────────
-#
-# Each entry: (INTENT, compiled_regex, entity_extractor_fn)
-# The extractor receives the re.Match object and returns a dict of entities.
-#
-# Supported intents:
-#   CREATE   – add a shape to the board
-#   DELETE   – remove selected or named objects
-#   MOVE     – reposition an object
-#   UPDATE   – change a property (color, size, text)
-#   CLEAR    – wipe the board
-#   UNDO     – undo last action
-#   REDO     – redo last undone action
-#   ZOOM     – zoom in / out / reset
-#   SELECT   – select objects by type or "all"
-# ─────────────────────────────────────────────────────────────────────────────
+class AICommandResponse(BaseModel):
+    success: bool
+    tool_calls: list[ToolCallResult]
+    message: str | None = None
 
-COLORS = (
-    r"(?:red|blue|green|yellow|orange|purple|pink|black|white|gray|grey|"
-    r"cyan|teal|magenta|brown|lime|indigo|violet|gold|silver|dark\s+\w+|light\s+\w+)"
-)
 
-SHAPES = r"(rectangle|square|circle|oval|ellipse|sticky\s+note|note|line|arrow|triangle)"
+# ── v2 Endpoint ───────────────────────────────────────────────────────────────
 
-# helper: normalise "sticky note" / "note" to canonical type names
-_SHAPE_MAP = {
-    "rectangle": "rectangle",
-    "square": "rectangle",
-    "circle": "circle",
-    "oval": "circle",
-    "ellipse": "circle",
-    "sticky note": "sticky-note",
-    "note": "sticky-note",
-    "line": "line",
-    "arrow": "connector",
-    "triangle": "triangle",
-}
+@app.post("/api/v2/ai-command", response_model=AICommandResponse)
+async def ai_command_v2(body: AICommandRequest) -> AICommandResponse:
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY environment variable not set")
 
+    llm = ChatAnthropic(
+        model="claude-sonnet-4-6",
+        temperature=0,
+        api_key=api_key,  # type: ignore[arg-type]
+    )
 
-def _shape(raw: str | None) -> str | None:
-    if raw is None:
-        return None
-    return _SHAPE_MAP.get(raw.strip().lower(), raw.strip().lower())
+    model_with_tools = llm.bind_tools(TOOLS)
 
+    messages = [
+        SystemMessage(content=build_system_prompt(body.board_state)),
+        HumanMessage(content=body.command),
+    ]
 
-def _color(raw: str | None) -> str | None:
-    return raw.strip().lower() if raw else None
+    response = await model_with_tools.ainvoke(messages)
 
+    tool_calls = [
+        ToolCallResult(name=tc["name"], args=tc.get("args") or {})
+        for tc in (response.tool_calls or [])
+    ]
 
-# ── CREATE ─────────────────────────────────────────────────────────────────
-
-_CREATE_FULL = re.compile(
-    rf"(?:create|add|make|draw|insert)\s+(?:a(?:n)?\s+)?({COLORS})\s+{SHAPES}",
-    re.IGNORECASE,
-)
-
-_CREATE_SHAPE_ONLY = re.compile(
-    rf"(?:create|add|make|draw|insert)\s+(?:a(?:n)?\s+)?{SHAPES}",
-    re.IGNORECASE,
-)
-
-_CREATE_COLOR_ONLY = re.compile(
-    rf"(?:create|add|make|draw|insert)\s+(?:a(?:n)?\s+)?({COLORS})\s+(?:one|object|shape)",
-    re.IGNORECASE,
-)
-
-
-def _extract_create(m: re.Match) -> dict[str, Any]:
-    groups = [g for g in m.groups() if g is not None]
-    if len(groups) == 2:
-        return {"color": _color(groups[0]), "type": _shape(groups[1])}
-    if len(groups) == 1:
-        raw = groups[0].lower()
-        if raw in _SHAPE_MAP:
-            return {"type": _shape(raw)}
-        return {"color": _color(raw)}
-    return {}
-
-
-# ── DELETE ─────────────────────────────────────────────────────────────────
-
-_DELETE_SELECTED = re.compile(
-    r"(?:delete|remove|erase|clear)\s+(?:the\s+)?(?:selected|highlighted|it|them)",
-    re.IGNORECASE,
-)
-
-_DELETE_TYPE = re.compile(
-    rf"(?:delete|remove|erase)\s+(?:all\s+)?(?:the\s+)?{SHAPES}s?",
-    re.IGNORECASE,
-)
-
-_DELETE_ALL = re.compile(
-    r"(?:delete|remove|erase)\s+(?:every(?:thing)?|all)",
-    re.IGNORECASE,
-)
-
-
-# ── MOVE ───────────────────────────────────────────────────────────────────
-
-_MOVE_COORDS = re.compile(
-    r"move\s+(?:it|selected|the\s+\w+)?\s*to\s+\(?(\d+)[,\s]+(\d+)\)?",
-    re.IGNORECASE,
-)
-
-_MOVE_DIR = re.compile(
-    r"move\s+(?:it|selected|the\s+\w+)?\s*(up|down|left|right)(?:\s+by\s+(\d+)(?:\s*px)?)?",
-    re.IGNORECASE,
-)
-
-
-# ── UPDATE ─────────────────────────────────────────────────────────────────
-
-_UPDATE_COLOR = re.compile(
-    rf"(?:change|set|make)\s+(?:(?:the\s+)?(?:color|fill|background)\s+(?:to|=)\s*)?({COLORS})",
-    re.IGNORECASE,
-)
-
-_UPDATE_SIZE = re.compile(
-    r"(?:resize|set\s+size|change\s+size)\s+(?:to\s+)?(\d+)(?:\s*[xX×]\s*(\d+))?",
-    re.IGNORECASE,
-)
-
-_UPDATE_TEXT = re.compile(
-    r'(?:set|change|update)\s+(?:the\s+)?text\s+(?:to\s+)?["\']?(.+?)["\']?$',
-    re.IGNORECASE,
-)
-
-
-# ── UNDO / REDO ────────────────────────────────────────────────────────────
-
-_UNDO = re.compile(r"^\s*undo\s*$", re.IGNORECASE)
-_REDO = re.compile(r"^\s*redo\s*$", re.IGNORECASE)
-
-
-# ── CLEAR ─────────────────────────────────────────────────────────────────
-
-_CLEAR_BOARD = re.compile(r"(?:clear|reset|wipe)\s+(?:the\s+)?(?:board|canvas|all|everything)", re.IGNORECASE)
-
-
-# ── ZOOM ───────────────────────────────────────────────────────────────────
-
-_ZOOM_IN  = re.compile(r"zoom\s+in(?:\s+(\d+)%?)?", re.IGNORECASE)
-_ZOOM_OUT = re.compile(r"zoom\s+out(?:\s+(\d+)%?)?", re.IGNORECASE)
-_ZOOM_RESET = re.compile(r"(?:zoom\s+)?reset\s+(?:zoom|view)", re.IGNORECASE)
-_ZOOM_PCT = re.compile(r"zoom\s+(?:to\s+)?(\d+)\s*%", re.IGNORECASE)
-
-
-# ── SELECT ─────────────────────────────────────────────────────────────────
-
-_SELECT_ALL   = re.compile(r"select\s+all", re.IGNORECASE)
-_SELECT_TYPE  = re.compile(rf"select\s+(?:all\s+)?{SHAPES}s?", re.IGNORECASE)
-_DESELECT     = re.compile(r"(?:deselect|unselect)\s+(?:all)?", re.IGNORECASE)
-
-
-# ── Master rule table ─────────────────────────────────────────────────────────
-# Each entry: (intent_label, [patterns_to_try_in_order], extractor_fn)
-
-def _first_match(patterns: list[re.Pattern], text: str) -> re.Match | None:
-    for p in patterns:
-        m = p.search(text)
-        if m:
-            return m
-    return None
-
-
-# ── Endpoint ──────────────────────────────────────────────────────────────────
-
-@app.post("/recognize-intent", response_model=RecognizeResponse)
-def recognize_intent(body: RecognizeRequest) -> RecognizeResponse:
-    cmd = body.command.strip()
-
-    # ── UNDO ──────────────────────────────────────────────────────────────
-    if _UNDO.match(cmd):
-        return RecognizeResponse(
-            intent="UNDO", entities={}, confidence=1.0, handler="local"
-        )
-
-    # ── REDO ──────────────────────────────────────────────────────────────
-    if _REDO.match(cmd):
-        return RecognizeResponse(
-            intent="REDO", entities={}, confidence=1.0, handler="local"
-        )
-
-    # ── CLEAR BOARD ────────────────────────────────────────────────────────
-    if _CLEAR_BOARD.search(cmd):
-        return RecognizeResponse(
-            intent="CLEAR", entities={}, confidence=1.0, handler="local"
-        )
-
-    # ── CREATE (color + shape) ─────────────────────────────────────────────
-    m = _CREATE_FULL.search(cmd)
-    if m:
-        return RecognizeResponse(
-            intent="CREATE",
-            entities=_extract_create(m),
-            confidence=1.0,
-            handler="local",
-        )
-
-    # ── CREATE (shape only) ────────────────────────────────────────────────
-    m = _CREATE_SHAPE_ONLY.search(cmd)
-    if m:
-        return RecognizeResponse(
-            intent="CREATE",
-            entities={"type": _shape(m.group(1))},
-            confidence=1.0,
-            handler="local",
-        )
-
-    # ── DELETE ─────────────────────────────────────────────────────────────
-    # Check specific-type first so "remove all rectangles" → type, not all
-    m = _DELETE_TYPE.search(cmd)
-    if m:
-        return RecognizeResponse(
-            intent="DELETE",
-            entities={"target": "type", "type": _shape(m.group(1))},
-            confidence=1.0,
-            handler="local",
-        )
-
-    if _DELETE_SELECTED.search(cmd):
-        return RecognizeResponse(
-            intent="DELETE", entities={"target": "selected"}, confidence=1.0, handler="local"
-        )
-
-    if _DELETE_ALL.search(cmd):
-        return RecognizeResponse(
-            intent="DELETE", entities={"target": "all"}, confidence=1.0, handler="local"
-        )
-
-    # ── MOVE ───────────────────────────────────────────────────────────────
-    m = _MOVE_COORDS.search(cmd)
-    if m:
-        return RecognizeResponse(
-            intent="MOVE",
-            entities={"x": int(m.group(1)), "y": int(m.group(2))},
-            confidence=1.0,
-            handler="local",
-        )
-
-    m = _MOVE_DIR.search(cmd)
-    if m:
-        entities: dict[str, Any] = {"direction": m.group(1).lower()}
-        if m.group(2):
-            entities["amount"] = int(m.group(2))
-        return RecognizeResponse(
-            intent="MOVE", entities=entities, confidence=1.0, handler="local"
-        )
-
-    # ── UPDATE COLOR ───────────────────────────────────────────────────────
-    m = _UPDATE_COLOR.search(cmd)
-    if m:
-        return RecognizeResponse(
-            intent="UPDATE",
-            entities={"property": "color", "value": _color(m.group(1))},
-            confidence=1.0,
-            handler="local",
-        )
-
-    # ── UPDATE SIZE ────────────────────────────────────────────────────────
-    m = _UPDATE_SIZE.search(cmd)
-    if m:
-        entities = {"property": "size", "width": int(m.group(1))}
-        if m.group(2):
-            entities["height"] = int(m.group(2))
-        return RecognizeResponse(
-            intent="UPDATE", entities=entities, confidence=1.0, handler="local"
-        )
-
-    # ── UPDATE TEXT ────────────────────────────────────────────────────────
-    m = _UPDATE_TEXT.search(cmd)
-    if m:
-        return RecognizeResponse(
-            intent="UPDATE",
-            entities={"property": "text", "value": m.group(1).strip()},
-            confidence=1.0,
-            handler="local",
-        )
-
-    # ── SELECT ─────────────────────────────────────────────────────────────
-    # Check specific-type first so "select all circles" → type, not all
-    m = _SELECT_TYPE.search(cmd)
-    if m:
-        return RecognizeResponse(
-            intent="SELECT",
-            entities={"target": "type", "type": _shape(m.group(1))},
-            confidence=1.0,
-            handler="local",
-        )
-
-    if _SELECT_ALL.search(cmd):
-        return RecognizeResponse(
-            intent="SELECT", entities={"target": "all"}, confidence=1.0, handler="local"
-        )
-
-    if _DESELECT.search(cmd):
-        return RecognizeResponse(
-            intent="DESELECT", entities={}, confidence=1.0, handler="local"
-        )
-
-    # ── ZOOM ───────────────────────────────────────────────────────────────
-    if _ZOOM_RESET.search(cmd):
-        return RecognizeResponse(
-            intent="ZOOM", entities={"action": "reset"}, confidence=1.0, handler="local"
-        )
-
-    m = _ZOOM_PCT.search(cmd)
-    if m:
-        return RecognizeResponse(
-            intent="ZOOM",
-            entities={"action": "set", "percent": int(m.group(1))},
-            confidence=1.0,
-            handler="local",
-        )
-
-    m = _ZOOM_IN.search(cmd)
-    if m:
-        entities = {"action": "in"}
-        if m.group(1):
-            entities["percent"] = int(m.group(1))
-        return RecognizeResponse(
-            intent="ZOOM", entities=entities, confidence=1.0, handler="local"
-        )
-
-    m = _ZOOM_OUT.search(cmd)
-    if m:
-        entities = {"action": "out"}
-        if m.group(1):
-            entities["percent"] = int(m.group(1))
-        return RecognizeResponse(
-            intent="ZOOM", entities=entities, confidence=1.0, handler="local"
-        )
-
-    # ── UNKNOWN — forward to claude-sonnet-4-6 via LangChain ──────────────
-    return RecognizeResponse(
-        intent="UNKNOWN",
-        entities={},
-        confidence=0.0,
-        handler="forward_to_langchain",
+    return AICommandResponse(
+        success=True,
+        tool_calls=tool_calls,
+        message=str(response.content) if not tool_calls else None,
     )
 
 
@@ -391,7 +362,7 @@ def recognize_intent(body: RecognizeRequest) -> RecognizeResponse:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "version": "2.0.0"}
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

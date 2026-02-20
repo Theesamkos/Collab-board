@@ -1,21 +1,22 @@
 /**
- * useAIAgent — two-layer AI routing hook
+ * useAIAgent v2 — single-layer AI routing hook
  *
- * Layer 1 (fast, free): Sends the command to the local Python microservice
- *   at http://localhost:8000/recognize-intent. If it recognises the intent,
- *   we execute it directly against the Zustand board store and return.
+ * Sends every command to ONE endpoint and executes the returned tool calls
+ * against the Zustand board store.
  *
- * Layer 2 (powerful): If the microservice returns handler:"forward_to_langchain",
- *   or is unreachable, the command goes to /api/ai-command which runs a
- *   claude-sonnet-4-6 agent (via LangChain) traced in LangSmith.
- *   The server returns an array of tool calls that we execute client-side.
+ * Endpoint resolution (in priority order):
+ *   1. VITE_AI_SERVICE_URL  (Railway always-on backend) → /api/v2/ai-command
+ *   2. /api/ai-command      (Vite dev plugin / Vercel function fallback)
+ *
+ * Set VITE_AI_SERVICE_URL=https://<your-railway-url>.railway.app in .env.local
+ * to use the Railway backend.  Leave it unset to use the built-in fallback.
  */
 
 import { useState, useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useBoardStore } from '../store/boardStore';
 
-// ── Phase type (mirrors the status values in AICommandInput) ──────────────────
+// ── Phase type ────────────────────────────────────────────────────────────────
 export type AIPhase = 'idle' | 'thinking' | 'creating' | 'done' | 'error';
 
 // ── Internal types ────────────────────────────────────────────────────────────
@@ -24,21 +25,22 @@ interface ToolCall {
   args: Record<string, unknown>;
 }
 
-interface LocalIntentResult {
-  intent: string;
-  entities: Record<string, unknown>;
-  confidence: number;
-  handler: 'local' | 'forward_to_langchain';
-}
+// ── Endpoint resolution ───────────────────────────────────────────────────────
+// VITE_AI_SERVICE_URL → Railway backend (always-on, no cold starts)
+// fallback           → Vite dev-server plugin or Vercel function
+const AI_BASE = import.meta.env.VITE_AI_SERVICE_URL as string | undefined;
+const AI_ENDPOINT = AI_BASE
+  ? `${AI_BASE.replace(/\/$/, '')}/api/v2/ai-command`
+  : '/api/ai-command';
 
-// ── Color helpers (mirrors AICommandInput so we can remove them from there) ───
+// ── Color helpers ─────────────────────────────────────────────────────────────
 const COLOR_MAP: Record<string, string> = {
-  yellow: '#FFDD57', gold: '#FFDD57', amber: '#F59E0B',
-  red: '#EF4444', pink: '#EC4899', magenta: '#D946EF',
+  yellow: '#FFDD57', gold: '#F59E0B', amber: '#F59E0B',
+  red: '#EF4444', pink: '#EC4899', magenta: '#D946EF', coral: '#F87171',
   blue: '#3B82F6', navy: '#1E40AF', sky: '#0EA5E9',
   green: '#22C55E', lime: '#84CC16', teal: '#14B8A6', emerald: '#10B981',
   purple: '#8B5CF6', violet: '#7C3AED', indigo: '#6366F1',
-  orange: '#F97316', coral: '#F87171',
+  orange: '#F97316',
   white: '#F8FAFC', gray: '#6B7280', grey: '#6B7280',
   black: '#1F2937', dark: '#1F2937',
 };
@@ -49,22 +51,24 @@ function resolveColor(raw: string | undefined, fallback: string): string {
   return COLOR_MAP[raw.toLowerCase()] ?? fallback;
 }
 
-// ── Tool executor (client-side board mutations) ───────────────────────────────
-// Mirrors the executeToolCall function in AICommandInput; centralised here so
-// both Layer 1 and Layer 2 share the same execution path.
+// ── Tool executor ─────────────────────────────────────────────────────────────
+// Executes a single tool call against the Zustand board store.
+// All new camera/viewport tools are handled here.
 function executeToolCall(call: ToolCall): void {
   const { name, args } = call;
   const store = useBoardStore.getState();
   const { addObject, updateObject, deleteObject, clearObjects, rearrangeObjects } = store;
 
   switch (name) {
+    // ── Shape creation ──────────────────────────────────────────────────────
     case 'createStickyNote':
       addObject({
         id: uuidv4(), type: 'sticky-note',
         x: typeof args.x === 'number' ? args.x : 80 + Math.random() * 500,
         y: typeof args.y === 'number' ? args.y : 80 + Math.random() * 350,
-        width: 200, height: 150,
-        text: typeof args.text === 'string' ? args.text : '',
+        width:  typeof args.width  === 'number' ? args.width  : 200,
+        height: typeof args.height === 'number' ? args.height : 150,
+        text:  typeof args.text  === 'string' ? args.text  : '',
         color: resolveColor(args.color as string | undefined, '#FFDD57'),
       });
       break;
@@ -87,13 +91,19 @@ function executeToolCall(call: ToolCall): void {
         x: typeof args.x === 'number' ? args.x : 100 + Math.random() * 500,
         y: typeof args.y === 'number' ? args.y : 100 + Math.random() * 350,
         width: radius * 2, height: radius * 2,
-        color: resolveColor(args.color as string | undefined, '#10B981'),
+        color: resolveColor(args.color as string | undefined, '#22C55E'),
       });
       break;
     }
 
+    // ── Object manipulation ─────────────────────────────────────────────────
     case 'moveObject':
-      if (args.objectId) updateObject(args.objectId as string, { x: args.x as number, y: args.y as number });
+      if (args.objectId) {
+        updateObject(args.objectId as string, {
+          x: args.x as number,
+          y: args.y as number,
+        });
+      }
       break;
 
     case 'deleteObject':
@@ -109,16 +119,19 @@ function executeToolCall(call: ToolCall): void {
       break;
     }
 
+    case 'changeColor':
+      if (args.objectId) {
+        updateObject(args.objectId as string, {
+          color: resolveColor(args.color as string | undefined, '#000000'),
+        });
+      }
+      break;
+
     case 'clearBoard':
       clearObjects();
       break;
 
-    case 'changeColor':
-      if (args.objectId) {
-        updateObject(args.objectId as string, { color: resolveColor(args.color as string | undefined, '#000000') });
-      }
-      break;
-
+    // ── Layout ──────────────────────────────────────────────────────────────
     case 'arrangeInGrid': {
       const cols    = typeof args.columns === 'number' && args.columns > 0 ? args.columns : 3;
       const spacing = typeof args.spacing === 'number' && args.spacing > 0 ? args.spacing : 240;
@@ -127,120 +140,70 @@ function executeToolCall(call: ToolCall): void {
         current.map((obj, i) => ({
           id: obj.id,
           x: 80 + (i % cols) * spacing,
-          y: 80 + Math.floor(i / cols) * spacing,
+          y: 80 + Math.floor(i / cols) * (spacing * 0.75),
         })),
       );
       break;
     }
 
+    // ── Camera / viewport ───────────────────────────────────────────────────
+    case 'setZoom': {
+      const current = useBoardStore.getState().zoom;
+      const action  = args.action as string;
+      if      (action === 'in')  store.setZoom(Math.min(4, current + 0.25));
+      else if (action === 'out') store.setZoom(Math.max(0.25, current - 0.25));
+      else if (action === 'reset') { store.setZoom(1); store.setPan(0, 0); }
+      else if (action === 'set' && typeof args.level === 'number') {
+        store.setZoom(Math.max(0.25, Math.min(4, args.level)));
+      }
+      break;
+    }
+
+    case 'panView': {
+      const { panX, panY } = useBoardStore.getState();
+      const dir    = args.direction as string;
+      const amount = typeof args.amount === 'number' ? args.amount : 200;
+      const dx = dir === 'left' ? amount : dir === 'right' ? -amount : 0;
+      const dy = dir === 'up'   ? amount : dir === 'down'  ? -amount : 0;
+      store.setPan(panX + dx, panY + dy);
+      break;
+    }
+
+    case 'resetView':
+      store.setZoom(1);
+      store.setPan(0, 0);
+      break;
+
+    case 'fitToView': {
+      const { objects } = useBoardStore.getState();
+      if (objects.length === 0) { store.setZoom(1); store.setPan(0, 0); break; }
+
+      // Calculate bounding box of all objects
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const obj of objects) {
+        minX = Math.min(minX, obj.x);
+        minY = Math.min(minY, obj.y);
+        maxX = Math.max(maxX, obj.x + (obj.width  ?? 0));
+        maxY = Math.max(maxY, obj.y + (obj.height ?? 0));
+      }
+
+      const contentW = maxX - minX + 80;  // 40px padding each side
+      const contentH = maxY - minY + 80;
+      // Account for header (~48px) and toolbar (~90px)
+      const viewW = window.innerWidth  - 40;
+      const viewH = window.innerHeight - 150;
+
+      const newZoom = Math.max(0.25, Math.min(2, Math.min(viewW / contentW, viewH / contentH)));
+      const newPanX = viewW / 2 - (minX + contentW / 2 - 40) * newZoom;
+      const newPanY = viewH / 2 - (minY + contentH / 2 - 40) * newZoom;
+
+      store.setZoom(newZoom);
+      store.setPan(newPanX, newPanY);
+      break;
+    }
+
     default:
       console.warn('[useAIAgent] Unknown tool call:', name);
-  }
-}
-
-// ── Layer 1: direct execution of locally-recognised intents ───────────────────
-function executeLocalIntent(result: LocalIntentResult): void {
-  const { intent, entities } = result;
-  const store = useBoardStore.getState();
-
-  switch (intent) {
-    case 'CREATE': {
-      const type = (entities.type as string) ?? 'rectangle';
-      const toolName =
-        type === 'sticky-note' ? 'createStickyNote' :
-        type === 'circle'      ? 'createCircle'     : 'createRectangle';
-      executeToolCall({ name: toolName, args: { color: entities.color } });
-      break;
-    }
-
-    case 'DELETE': {
-      if (entities.target === 'selected') {
-        store.deleteSelectedObjects();
-      } else if (entities.target === 'all') {
-        store.clearObjects();
-      } else if (entities.target === 'type') {
-        const { objects } = useBoardStore.getState();
-        objects
-          .filter((o) => o.type === entities.type)
-          .forEach((o) => store.deleteObject(o.id));
-      }
-      break;
-    }
-
-    case 'CLEAR':
-      store.clearObjects();
-      break;
-
-    case 'UNDO':
-      useBoardStore.temporal.getState().undo();
-      break;
-
-    case 'REDO':
-      useBoardStore.temporal.getState().redo();
-      break;
-
-    case 'ZOOM': {
-      const current = useBoardStore.getState().zoom;
-      if      (entities.action === 'reset') { store.setZoom(1); store.setPan(0, 0); }
-      else if (entities.action === 'in')    { store.setZoom(Math.min(4, current + 0.25)); }
-      else if (entities.action === 'out')   { store.setZoom(Math.max(0.25, current - 0.25)); }
-      else if (entities.action === 'set' && typeof entities.percent === 'number') {
-        store.setZoom(entities.percent / 100);
-      }
-      break;
-    }
-
-    case 'SELECT': {
-      const { objects } = useBoardStore.getState();
-      if (entities.target === 'all') {
-        store.setSelectedObjectIds(objects.map((o) => o.id));
-      } else if (entities.target === 'type') {
-        store.setSelectedObjectIds(
-          objects.filter((o) => o.type === entities.type).map((o) => o.id),
-        );
-      }
-      break;
-    }
-
-    case 'DESELECT':
-      store.clearSelection();
-      break;
-
-    case 'MOVE': {
-      const { objects, selectedObjectIds } = useBoardStore.getState();
-      if (typeof entities.x === 'number' && typeof entities.y === 'number') {
-        selectedObjectIds.forEach((id) =>
-          store.updateObject(id, { x: entities.x as number, y: entities.y as number }),
-        );
-      } else if (typeof entities.direction === 'string') {
-        const step = typeof entities.amount === 'number' ? entities.amount : 20;
-        const dx = entities.direction === 'left' ? -step : entities.direction === 'right' ? step : 0;
-        const dy = entities.direction === 'up'   ? -step : entities.direction === 'down'  ? step : 0;
-        selectedObjectIds.forEach((id) => {
-          const obj = objects.find((o) => o.id === id);
-          if (obj) store.updateObject(id, { x: obj.x + dx, y: obj.y + dy });
-        });
-      }
-      break;
-    }
-
-    case 'UPDATE': {
-      const { selectedObjectIds } = useBoardStore.getState();
-      if (entities.property === 'color') {
-        selectedObjectIds.forEach((id) =>
-          store.updateObject(id, { color: resolveColor(entities.value as string, '#3B82F6') }),
-        );
-      } else if (entities.property === 'size') {
-        const w = entities.width as number;
-        const h = (entities.height as number | undefined) ?? w;
-        selectedObjectIds.forEach((id) => store.updateObject(id, { width: w, height: h }));
-      } else if (entities.property === 'text') {
-        selectedObjectIds.forEach((id) =>
-          store.updateObject(id, { text: entities.value as string }),
-        );
-      }
-      break;
-    }
   }
 }
 
@@ -260,68 +223,51 @@ export function useAIAgent() {
       setErrorMsg('');
 
       try {
-        // ── Layer 1: local intent-recognition microservice ──────────────────
-        let forwardToLangChain = true;
+        // ── Single AI call ──────────────────────────────────────────────────
+        // Calls the Railway backend (VITE_AI_SERVICE_URL) when configured,
+        // or falls back to the Vercel / Vite-dev-plugin route.
+        const response = await fetch(AI_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            command:     cmd,
+            // Railway backend uses snake_case; Vercel function uses camelCase.
+            // We send both so both endpoints work from the same payload.
+            board_state: objects,
+            boardState:  objects,
+            boardId,
+          }),
+        });
 
-        try {
-          const r = await fetch('https://collab-board-ai.onrender.com/recognize-intent', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: cmd }),
-            signal: AbortSignal.timeout(2_000),
-          });
+        const data = await response.json();
 
-          if (r.ok) {
-            const result: LocalIntentResult = await r.json();
-
-            if (result.handler === 'local') {
-              // Fast path: zero LLM cost, <2 ms latency
-              setPhase('creating');
-              await new Promise<void>((res) => setTimeout(res, 80));
-              executeLocalIntent(result);
-              setPhase('done');
-              setTimeout(() => setPhase('idle'), 2_200);
-              return;
-            }
-
-            // handler === 'forward_to_langchain' → fall through
-            forwardToLangChain = true;
-          }
-        } catch {
-          // Microservice unavailable (not running, timed out) — fall through
-          console.debug('[useAIAgent] local service unavailable, routing to claude-sonnet-4-6');
+        if (!response.ok) {
+          throw new Error(data.error ?? data.detail ?? `Server error ${response.status}`);
         }
 
-        if (forwardToLangChain) {
-          // ── Layer 2: LangChain agent (claude-sonnet-4-6, traced via LangSmith) ──
-          if (!boardId) throw new Error('No active board');
+        // Railway returns data.tool_calls; Vercel function returns data.toolCalls
+        const toolCalls: ToolCall[] = (data.tool_calls ?? data.toolCalls ?? []).map(
+          (tc: { name: string; args?: Record<string, unknown> }) => ({
+            name: tc.name,
+            args: tc.args ?? {},
+          }),
+        );
 
-          const response = await fetch('/api/ai-command', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: cmd, boardId, boardState: objects }),
-          });
+        if (toolCalls.length === 0) {
+          setPhase('done');
+          setTimeout(() => setPhase('idle'), 2_200);
+          return;
+        }
 
-          const data = await response.json();
-          if (!response.ok) throw new Error(data.error ?? `Server error ${response.status}`);
+        setPhase('creating');
+        // Small visual delay so the "Creating…" state is perceptible
+        await new Promise<void>((res) => setTimeout(res, 80));
 
-          const toolCalls: ToolCall[] = data.toolCalls ?? [];
-
-          if (toolCalls.length === 0) {
-            setPhase('done');
-            setTimeout(() => setPhase('idle'), 2_200);
-            return;
-          }
-
-          setPhase('creating');
-          await new Promise<void>((res) => setTimeout(res, 120));
-
-          for (const call of toolCalls) {
-            try {
-              executeToolCall(call);
-            } catch (err) {
-              console.warn(`[useAIAgent] tool "${call.name}" failed:`, err);
-            }
+        for (const call of toolCalls) {
+          try {
+            executeToolCall(call);
+          } catch (err) {
+            console.warn(`[useAIAgent] tool "${call.name}" failed:`, err);
           }
         }
 
@@ -329,7 +275,7 @@ export function useAIAgent() {
         setTimeout(() => setPhase('idle'), 2_200);
 
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Something went wrong';
+        const msg = err instanceof Error ? err.message : 'Something went wrong. Please try again.';
         setErrorMsg(msg);
         setPhase('error');
         setTimeout(() => setPhase('idle'), 4_000);
