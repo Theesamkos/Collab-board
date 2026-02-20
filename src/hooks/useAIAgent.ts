@@ -25,7 +25,7 @@ interface ToolCall {
 // ── Endpoint resolution ───────────────────────────────────────────────────────
 const BACKEND_URL = (import.meta.env.VITE_AI_BACKEND_URL as string | undefined)
   || 'https://collab-board-backend-production-d852.up.railway.app';
-const AI_ENDPOINT = `${BACKEND_URL.replace(/\/$/, '')}/api/v2/ai-command`;
+const AI_ENDPOINT = `${BACKEND_URL.replace(/\/$/, '')}/recognize-intent`;
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
 const COLOR_MAP: Record<string, string> = {
@@ -224,14 +224,7 @@ export function useAIAgent() {
         const response = await fetch(AI_ENDPOINT, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            command:     cmd,
-            // Railway backend uses snake_case; Vercel function uses camelCase.
-            // We send both so both endpoints work from the same payload.
-            board_state: objects,
-            boardState:  objects,
-            boardId,
-          }),
+          body: JSON.stringify({ command: cmd }),
         });
 
         const data = await response.json();
