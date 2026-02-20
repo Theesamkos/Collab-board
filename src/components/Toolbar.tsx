@@ -4,7 +4,7 @@ import {
   Save, Check, Loader2,
   Pencil, Hand, MousePointer, Trash2,
   ZoomIn, ZoomOut, RotateCcw, Share2,
-  Undo2, Redo2, Frame, Layers,
+  Undo2, Redo2, Frame, Layers, Type,
 } from 'lucide-react';
 import { useBoardStore, ActiveTool } from '../store/boardStore';
 import { useUndoRedo } from '../hooks/useUndoRedo';
@@ -203,6 +203,8 @@ export function Toolbar() {
             active={activeTool === 'connector'} onClick={() => setTool('connector')} />
           <ToolDockIcon icon={<Frame size={17} />} label="Frame (drag to create)"
             active={activeTool === 'frame'} onClick={() => setTool('frame')} />
+          <ToolDockIcon icon={<Type size={17} />} label="Text (T)"
+            active={activeTool === 'text'} onClick={() => setTool('text')} />
           <ToolDockIcon icon={<Hand size={17} />} label="Pan"
             active={activeTool === 'pan'} onClick={() => setTool('pan')} />
           <ToolDockIcon icon={<MousePointer size={17} />} label="Select"

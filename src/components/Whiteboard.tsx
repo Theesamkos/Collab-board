@@ -151,6 +151,8 @@ export function Whiteboard() {
   const [resizeCursor, setResizeCursor] = useState<string | null>(null);
   // Relative positions of objects contained inside a frame while it's dragged
   const frameDragContentsRef = useRef<{ id: string; relX: number; relY: number }[]>([]);
+  // When placing a text element, store its ID here so the next render can open edit mode
+  const pendingEditIdRef = useRef<string | null>(null);
 
   // ── Group-drag tracking ──────────────────────────────────────────
   // Start position of the object being dragged (canvas coords)
@@ -183,26 +185,46 @@ export function Whiteboard() {
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
   }, []);
 
-  // Auto-focus textarea
+  // Auto-focus textarea; also auto-size text elements
   useEffect(() => {
     if (editingId && textareaRef.current) {
       textareaRef.current.focus();
       textareaRef.current.select();
+      const obj = objects.find((o) => o.id === editingId);
+      if (obj?.type === 'text') {
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+      }
     }
-  }, [editingId]);
+  }, [editingId, objects]);
 
-  // Delete key
+  // When a new text object is created via the text tool, open edit mode once it renders
+  useEffect(() => {
+    if (pendingEditIdRef.current) {
+      const obj = objects.find((o) => o.id === pendingEditIdRef.current);
+      if (obj) {
+        setEditingText('');
+        setEditingId(pendingEditIdRef.current);
+        pendingEditIdRef.current = null;
+      }
+    }
+  }, [objects]);
+
+  // Delete key + 'T' tool shortcut
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if ((e.key === 'Delete' || e.key === 'Backspace') && editingId === null) {
-        const tag = (e.target as HTMLElement).tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
         deleteSelectedObjects();
+      }
+      if (e.key === 't' && !e.metaKey && !e.ctrlKey && editingId === null) {
+        setActiveTool('text');
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [editingId, deleteSelectedObjects]);
+  }, [editingId, deleteSelectedObjects, setActiveTool]);
 
   // Copy / Cut / Paste (Cmd/Ctrl + C / X / V)
   useEffect(() => {
@@ -227,6 +249,7 @@ export function Whiteboard() {
     rect:      'crosshair',
     connector: 'crosshair',
     frame:     'crosshair',
+    text:      'text',
   };
 
   const startEditing = (obj: BoardObject, e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -237,7 +260,16 @@ export function Whiteboard() {
   };
 
   const commitEdit = () => {
-    if (editingId) { updateObject(editingId, { text: editingText }); setEditingId(null); }
+    if (editingId) {
+      const obj = objectsRef.current.find((o) => o.id === editingId);
+      const updates: Partial<BoardObject> = { text: editingText };
+      // Persist the auto-expanded height for standalone text elements
+      if (obj?.type === 'text' && textareaRef.current) {
+        updates.height = Math.max(40, textareaRef.current.scrollHeight / zoom);
+      }
+      updateObject(editingId, updates);
+      setEditingId(null);
+    }
   };
   const cancelEdit = () => setEditingId(null);
 
@@ -267,6 +299,80 @@ export function Whiteboard() {
     const containerRect = containerRef.current?.getBoundingClientRect();
     const offsetX = containerRect?.left ?? 0;
     const offsetY = containerRect?.top ?? 0;
+
+    // Rectangle: textarea overlays the shape exactly
+    if (obj.type === 'rectangle') {
+      return {
+        position: 'fixed',
+        left:  offsetX + panX + obj.x * zoom,
+        top:   offsetY + panY + obj.y * zoom,
+        width:  obj.width  * zoom,
+        height: obj.height * zoom,
+        padding: `${10 * zoom}px`,
+        fontSize: `${14 * zoom}px`,
+        lineHeight: '1.5',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        background: obj.color || '#17a2b8',
+        border: '2px solid #17a2b8',
+        resize: 'none',
+        outline: 'none',
+        wordBreak: 'break-word' as const,
+        overflow: 'hidden',
+        zIndex: 1000,
+        color: '#ffffff',
+        textAlign: 'center' as const,
+      };
+    }
+
+    // Circle: textarea overlays the circle bounding box
+    if (obj.type === 'circle') {
+      const r = obj.width / 2;
+      return {
+        position: 'fixed',
+        left:  offsetX + panX + (obj.x - r) * zoom,
+        top:   offsetY + panY + (obj.y - r) * zoom,
+        width:  obj.width * zoom,
+        height: obj.width * zoom,
+        padding: `${Math.max(8 * zoom, (r - 20) * zoom)}px ${10 * zoom}px`,
+        fontSize: `${14 * zoom}px`,
+        lineHeight: '1.5',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        background: 'transparent',
+        border: '2px dashed #17a2b8',
+        borderRadius: '50%',
+        resize: 'none',
+        outline: 'none',
+        wordBreak: 'break-word' as const,
+        overflow: 'hidden',
+        zIndex: 1000,
+        color: '#ffffff',
+        textAlign: 'center' as const,
+      };
+    }
+
+    // Standalone text element
+    if (obj.type === 'text') {
+      return {
+        position: 'fixed',
+        left: offsetX + panX + obj.x * zoom,
+        top:  offsetY + panY + obj.y * zoom,
+        width: obj.width * zoom,
+        minHeight: `${20 * zoom}px`,
+        padding: `${4 * zoom}px ${6 * zoom}px`,
+        fontSize: `${18 * zoom}px`,
+        lineHeight: '1.4',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        background: 'transparent',
+        border: '1px dashed rgba(23,162,184,0.5)',
+        borderRadius: 2,
+        resize: 'none',
+        outline: 'none',
+        wordBreak: 'break-word' as const,
+        overflow: 'hidden',
+        zIndex: 1000,
+        color: obj.color || '#e2e8f0',
+      };
+    }
 
     // Frame: small title bar floating above the top edge
     if (obj.type === 'frame') {
@@ -402,9 +508,14 @@ export function Whiteboard() {
       rectStartRef.current = pos;
       liveRectRef.current = null;
       setLiveRect(null);
+    } else if (activeTool === 'text') {
+      const newId = crypto.randomUUID();
+      addObject({ id: newId, type: 'text', x: pos.x, y: pos.y, width: 200, height: 40, text: '', color: '#e2e8f0' });
+      pendingEditIdRef.current = newId;
+      setActiveTool('select');
     }
     // connector: drawing starts via connection-point circle onMouseDown
-  }, [activeTool]);
+  }, [activeTool, addObject, setActiveTool]);
 
   const handleDrawMouseMove = useCallback((_e: Konva.KonvaEventObject<MouseEvent>) => {
     const stage = stageRef.current;
@@ -870,29 +981,74 @@ export function Whiteboard() {
 
       case 'rectangle':
         return (
-          <Rect
+          <Group
             key={obj.id} id={obj.id}
-            x={effObj.x} y={effObj.y} width={effObj.width} height={effObj.height}
-            fill={obj.color || '#17a2b8'}
-            stroke={isSelected ? '#17a2b8' : (obj.strokeColor || 'rgba(0,0,0,0.2)')}
-            strokeWidth={isSelected ? 2.5 : (obj.strokeColor ? 2 : 1)}
-            draggable={objectsDraggable}
+            x={effObj.x} y={effObj.y}
+            draggable={objectsDraggable && !isEditing}
             onClick={(e) => { e.cancelBubble = true; selectObject(obj.id, shiftHeldRef.current); }}
+            onDblClick={(e) => startEditing(obj, e)}
             {...groupDragProps(obj)}
             {...connectorHoverProps(obj.id)}
-          />
+          >
+            <Rect
+              width={effObj.width} height={effObj.height}
+              fill={obj.color || '#17a2b8'}
+              stroke={isSelected ? '#17a2b8' : (obj.strokeColor || 'rgba(0,0,0,0.2)')}
+              strokeWidth={isSelected ? 2.5 : (obj.strokeColor ? 2 : 1)}
+            />
+            {!isEditing && obj.text && (
+              <Text
+                text={obj.text} width={effObj.width} height={effObj.height}
+                align="center" verticalAlign="middle"
+                padding={10} fontSize={14} fill="#ffffff" wrap="word"
+                listening={false}
+              />
+            )}
+          </Group>
         );
 
       case 'circle':
         return (
-          <Circle
+          <Group
             key={obj.id} id={obj.id}
-            x={effObj.x} y={effObj.y} radius={effObj.width / 2}
-            fill={obj.color || '#28a745'}
-            stroke={isSelected ? '#dc3545' : 'rgba(0,0,0,0.2)'}
-            strokeWidth={isSelected ? 2 : 1}
-            draggable={objectsDraggable}
+            x={effObj.x} y={effObj.y}
+            draggable={objectsDraggable && !isEditing}
             onClick={(e) => { e.cancelBubble = true; selectObject(obj.id, shiftHeldRef.current); }}
+            onDblClick={(e) => startEditing(obj, e)}
+            {...groupDragProps(obj)}
+            {...connectorHoverProps(obj.id)}
+          >
+            <Circle
+              radius={effObj.width / 2}
+              fill={obj.color || '#28a745'}
+              stroke={isSelected ? '#dc3545' : 'rgba(0,0,0,0.2)'}
+              strokeWidth={isSelected ? 2 : 1}
+            />
+            {!isEditing && obj.text && (
+              <Text
+                text={obj.text}
+                x={-effObj.width / 2} y={-effObj.width / 2}
+                width={effObj.width} height={effObj.width}
+                align="center" verticalAlign="middle"
+                padding={10} fontSize={14} fill="#ffffff" wrap="word"
+                listening={false}
+              />
+            )}
+          </Group>
+        );
+
+      case 'text':
+        return (
+          <Text
+            key={obj.id} id={obj.id}
+            x={effObj.x} y={effObj.y}
+            text={isEditing ? '' : (obj.text || 'Type something…')}
+            width={effObj.width}
+            fontSize={18} fill={obj.color || '#e2e8f0'} wrap="word"
+            opacity={!obj.text && !isEditing ? 0.4 : 1}
+            draggable={objectsDraggable && !isEditing}
+            onClick={(e) => { e.cancelBubble = true; selectObject(obj.id, shiftHeldRef.current); }}
+            onDblClick={(e) => startEditing(obj, e)}
             {...groupDragProps(obj)}
             {...connectorHoverProps(obj.id)}
           />
@@ -1110,14 +1266,25 @@ export function Whiteboard() {
         </Layer>
       </Stage>
 
-      {/* Sticky-note text editor */}
+      {/* Object text editor */}
       {editingObj && (
         <textarea
           ref={textareaRef}
           value={editingText}
-          onChange={(e) => setEditingText(e.target.value)}
+          onChange={(e) => {
+            setEditingText(e.target.value);
+            // Auto-expand height for standalone text elements
+            if (editingObj.type === 'text') {
+              e.target.style.height = 'auto';
+              e.target.style.height = e.target.scrollHeight + 'px';
+            }
+          }}
           onBlur={commitEdit}
-          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); } }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+            // Cmd+Enter also commits
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commitEdit(); }
+          }}
           style={getTextareaStyle(editingObj)}
         />
       )}

@@ -26,7 +26,7 @@ export interface BoardObject {
   };
 }
 
-export type ActiveTool = 'select' | 'pan' | 'draw' | 'rect' | 'connector' | 'frame';
+export type ActiveTool = 'select' | 'pan' | 'draw' | 'rect' | 'connector' | 'frame' | 'text';
 
 interface BoardState {
   boardId: string | null;
