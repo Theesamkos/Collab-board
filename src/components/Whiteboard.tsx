@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, Fragment } from 'react';
 import { Stage, Layer, Rect, Circle, Line, Text, Group, Arrow } from 'react-konva';
 import Konva from 'konva';
 import { useBoardStore } from '../store/boardStore';
@@ -151,6 +151,8 @@ export function Whiteboard() {
   const [resizeCursor, setResizeCursor] = useState<string | null>(null);
   // Relative positions of objects contained inside a frame while it's dragged
   const frameDragContentsRef = useRef<{ id: string; relX: number; relY: number }[]>([]);
+  // Timeout ref for delaying connection-point hide (gives user time to reach the dot)
+  const connectorHoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // When placing a text element, store its ID here so the next render can open edit mode
   const pendingEditIdRef = useRef<string | null>(null);
 
@@ -225,6 +227,21 @@ export function Whiteboard() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [editingId, deleteSelectedObjects, setActiveTool]);
+
+  // Escape: cancel in-progress connector draw
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (connectorStartRef.current) {
+        connectorStartRef.current = null;
+        setIsConnecting(false);
+        setLiveConnectorEnd(null);
+        setSnapTarget(null);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // Copy / Cut / Paste (Cmd/Ctrl + C / X / V)
   useEffect(() => {
@@ -768,28 +785,78 @@ export function Whiteboard() {
   };
 
   // ── Connection-point indicator circles ────────────────────────────
-  const renderConnectionPoints = (objectId: string) => {
+  // isHovered=true → full-size interactive dots with large hit area
+  // isHovered=false → small ambient dots on background objects (no interaction)
+  const renderConnectionPoints = (objectId: string, isHovered: boolean) => {
     const obj = objectsRef.current.find((o) => o.id === objectId);
     if (!obj || obj.type === 'connector') return null;
+
+    // Sizes are in canvas units; divide by zoom so they're screen-constant
+    const HIT_R = 22 / zoom;    // invisible hit area: always 22px on screen
+    const VIS_R = (isHovered ? 6 : 3.5) / zoom;   // visible dot
+    const SW    = (isHovered ? 1.5 : 1) / zoom;   // stroke width
 
     return CONNECTION_POINT_IDS.map((pt) => {
       const coords = getConnectionPointCoords(obj, pt);
       const isSnap = snapTarget?.objectId === objectId && snapTarget.point === pt;
+
       return (
-        <Circle
-          key={`cp-${objectId}-${pt}`}
-          x={coords.x} y={coords.y}
-          radius={isSnap ? 8 : 6}
-          fill={isSnap ? '#17a2b8' : 'rgba(255,255,255,0.95)'}
-          stroke={isSnap ? '#0d7a8c' : '#17a2b8'}
-          strokeWidth={isSnap ? 3 : 1.5}
-          onMouseDown={(e) => {
-            e.cancelBubble = true;
-            connectorStartRef.current = { objectId, point: pt, ...coords };
-            setIsConnecting(true);
-          }}
-          onClick={(e) => { e.cancelBubble = true; }}
-        />
+        <Fragment key={`cp-${objectId}-${pt}`}>
+          {/* Large invisible hit area — makes targeting easy */}
+          {isHovered && (
+            <Circle
+              x={coords.x} y={coords.y}
+              radius={HIT_R}
+              fill="transparent"
+              onMouseEnter={() => {
+                // Entering the hit area cancels any pending hide timer
+                if (connectorHoverTimeoutRef.current) {
+                  clearTimeout(connectorHoverTimeoutRef.current);
+                  connectorHoverTimeoutRef.current = null;
+                }
+                setHoveredObjectId(objectId);
+                setSnapTarget({ objectId, point: pt, ...coords });
+              }}
+              onMouseLeave={() => {
+                if (!connectorStartRef.current) setSnapTarget(null);
+              }}
+              onMouseDown={(e) => {
+                e.cancelBubble = true;
+                if (connectorHoverTimeoutRef.current) {
+                  clearTimeout(connectorHoverTimeoutRef.current);
+                  connectorHoverTimeoutRef.current = null;
+                }
+                connectorStartRef.current = { objectId, point: pt, ...coords };
+                setIsConnecting(true);
+              }}
+              onClick={(e) => { e.cancelBubble = true; }}
+            />
+          )}
+
+          {/* Outer ring highlight when snapped */}
+          {isSnap && (
+            <Circle
+              x={coords.x} y={coords.y}
+              radius={14 / zoom}
+              fill="transparent"
+              stroke="#17a2b8"
+              strokeWidth={1 / zoom}
+              opacity={0.45}
+              listening={false}
+            />
+          )}
+
+          {/* Visible dot */}
+          <Circle
+            x={coords.x} y={coords.y}
+            radius={isSnap ? 8 / zoom : VIS_R}
+            fill={isSnap ? '#17a2b8' : 'rgba(255,255,255,0.95)'}
+            stroke={isSnap ? '#0d7a8c' : '#17a2b8'}
+            strokeWidth={isSnap ? 3 / zoom : SW}
+            opacity={isHovered ? 1 : 0.4}
+            listening={false}
+          />
+        </Fragment>
       );
     });
   };
@@ -835,12 +902,25 @@ export function Whiteboard() {
   const objectsDraggable = activeTool === 'select';
   const stageDraggable   = activeTool === 'pan';
 
-  // Hover handlers for connector tool
+  // Hover handlers for connector tool — object-level enter/leave with 600ms hide delay
   const connectorHoverProps = (objId: string) =>
     activeTool === 'connector'
       ? {
-          onMouseEnter: () => setHoveredObjectId(objId),
-          onMouseLeave: () => { if (!connectorStartRef.current) setHoveredObjectId(null); },
+          onMouseEnter: () => {
+            if (connectorHoverTimeoutRef.current) {
+              clearTimeout(connectorHoverTimeoutRef.current);
+              connectorHoverTimeoutRef.current = null;
+            }
+            setHoveredObjectId(objId);
+          },
+          onMouseLeave: () => {
+            if (!connectorStartRef.current) {
+              connectorHoverTimeoutRef.current = setTimeout(() => {
+                setHoveredObjectId(null);
+                connectorHoverTimeoutRef.current = null;
+              }, 600);
+            }
+          },
         }
       : {};
 
@@ -1247,8 +1327,11 @@ export function Whiteboard() {
           {/* Resize handles for single selected object */}
           {renderResizeHandles()}
 
-          {/* Connector-tool: connection point indicators */}
-          {activeTool === 'connector' && hoveredObjectId && renderConnectionPoints(hoveredObjectId)}
+          {/* Connector-tool: ambient dots on all objects + full interactive dots on hovered */}
+          {activeTool === 'connector' && objects
+            .filter((o) => o.type !== 'connector' && o.type !== 'line')
+            .map((o) => renderConnectionPoints(o.id, o.id === hoveredObjectId))
+          }
 
           {/* Connector-tool: live preview */}
           {isConnecting && connectorStartRef.current && (
