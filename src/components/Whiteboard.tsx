@@ -65,7 +65,7 @@ export function Whiteboard() {
     setPan, setZoom,
     addObject, updateObject, deleteObject, selectObject, setSelectedObjectIds, clearSelection,
     activeTool, deleteSelectedObjects, selectedObjectIds,
-    copySelection, cutSelection, pasteClipboard,
+    copySelection, cutSelection, pasteClipboard, duplicateSelection,
   } = useBoardStore();
 
   const [stageSize, setStageSize] = useState({ width: window.innerWidth, height: window.innerHeight });
@@ -168,10 +168,11 @@ export function Whiteboard() {
       if (e.key === 'c' || e.key === 'C') { e.preventDefault(); copySelection(); }
       else if (e.key === 'x' || e.key === 'X') { e.preventDefault(); cutSelection(); }
       else if (e.key === 'v' || e.key === 'V') { e.preventDefault(); pasteClipboard(); }
+      else if (e.key === 'd' || e.key === 'D') { e.preventDefault(); duplicateSelection(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [copySelection, cutSelection, pasteClipboard]);
+  }, [copySelection, cutSelection, pasteClipboard, duplicateSelection]);
 
   const cursorStyle: Record<string, string> = {
     select:    'default',

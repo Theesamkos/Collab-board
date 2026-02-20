@@ -56,6 +56,7 @@ interface BoardState {
   copySelection: () => void;
   cutSelection: () => void;
   pasteClipboard: () => void;
+  duplicateSelection: () => void;
   setPan: (x: number, y: number) => void;
   setZoom: (zoom: number) => void;
   setActiveTool: (tool: ActiveTool) => void;
@@ -221,6 +222,50 @@ export const useBoardStore = create<BoardState>()(
       // Cut clipboard is one-shot; copy clipboard persists for repeated pastes
       clipboard: clipboardMode === 'cut' ? [] : state.clipboard,
       clipboardMode: clipboardMode === 'cut' ? null : state.clipboardMode,
+    }));
+    scheduleSyncDebounced(get);
+  },
+
+  duplicateSelection: () => {
+    const { selectedObjectIds, objects } = get();
+    if (selectedObjectIds.length === 0) return;
+
+    const OFFSET = 20;
+    const selectedIds = new Set(selectedObjectIds);
+    const selected = objects.filter((o) => selectedIds.has(o.id));
+
+    // Include connectors whose both endpoints are selected
+    const implicitConnectors = objects.filter(
+      (o) =>
+        o.type === 'connector' &&
+        !selectedIds.has(o.id) &&
+        selectedIds.has(o.source?.objectId ?? '') &&
+        selectedIds.has(o.target?.objectId ?? ''),
+    );
+
+    const idMap = new Map<string, string>();
+    const newObjects: BoardObject[] = [];
+
+    for (const obj of selected) {
+      if (obj.type === 'connector') continue;
+      const newId = crypto.randomUUID();
+      idMap.set(obj.id, newId);
+      newObjects.push({ ...obj, id: newId, x: obj.x + OFFSET, y: obj.y + OFFSET });
+    }
+
+    for (const obj of implicitConnectors) {
+      if (!obj.source || !obj.target) continue;
+      newObjects.push({
+        ...obj,
+        id: crypto.randomUUID(),
+        source: { ...obj.source, objectId: idMap.get(obj.source.objectId) ?? obj.source.objectId },
+        target: { ...obj.target, objectId: idMap.get(obj.target.objectId) ?? obj.target.objectId },
+      });
+    }
+
+    set((state) => ({
+      objects: [...state.objects, ...newObjects],
+      selectedObjectIds: newObjects.map((o) => o.id),
     }));
     scheduleSyncDebounced(get);
   },
