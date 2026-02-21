@@ -35,14 +35,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/board/:boardId"
-        element={
-          <ProtectedRoute>
-            <Board />
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/board/:boardId" element={<Board />} />
       <Route path="/" element={<Navigate to="/dashboard" />} />
     </Routes>
   );

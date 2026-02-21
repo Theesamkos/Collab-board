@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Loader2, Wifi, WifiOff, LogOut, ChevronUp, ChevronDown, ArrowLeft } from 'lucide-react';
+import { Loader2, Wifi, WifiOff, LogOut, ChevronUp, ChevronDown, ArrowLeft, LogIn } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useBoardStore } from '../store/boardStore';
 import { useBoardSync } from '../hooks/useBoardSync';
@@ -116,19 +116,28 @@ export function Board() {
 
   useEffect(() => {
     const load = async () => {
-      if (!routeBoardId || !session?.user?.id) { navigate('/dashboard'); return; }
+      if (!routeBoardId) { navigate('/dashboard'); return; }
 
       const { data, error } = await supabase
         .from('boards')
-        .select('id, title, objects')
+        .select('id, title, objects, is_public')
         .eq('id', routeBoardId)
         .single();
 
       if (error || !data) { navigate('/dashboard'); return; }
 
-      await supabase
-        .from('board_members')
-        .upsert({ board_id: routeBoardId, user_id: session.user.id });
+      // If board is private and user is not authenticated, redirect to login
+      if (!data.is_public && !session?.user?.id) {
+        navigate('/login');
+        return;
+      }
+
+      // Only add to board_members if authenticated
+      if (session?.user?.id) {
+        await supabase
+          .from('board_members')
+          .upsert({ board_id: routeBoardId, user_id: session.user.id });
+      }
 
       setBoardId(data.id);
       setBoardTitle(data.title ?? 'Untitled Board');
@@ -147,17 +156,19 @@ export function Board() {
       }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
           <Loader2 size={28} className="animate-spin" style={{ color: '#17c5c8' }} />
-          <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: '14px' }}>Loading your board…</p>
+          <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: '14px' }}>Loading board…</p>
         </div>
       </div>
     );
   }
 
+  const isAuthenticated = !!session?.user?.id;
+
   return (
     <CollabProvider boardId={boardId!}>
       <div className="h-screen flex flex-col" style={{ backgroundColor: '#ffffff' }}>
-        <CursorTracker />
-        <RemoteCursors />
+        {isAuthenticated && <CursorTracker />}
+        {isAuthenticated && <RemoteCursors />}
 
         {/* ── Header ── */}
         <header style={{
@@ -168,10 +179,10 @@ export function Board() {
           display: 'flex', alignItems: 'center',
           padding: '0 14px', gap: '8px',
         }}>
-          {/* Left: Back + Logout */}
+          {/* Left: Back + Auth action */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
             <Link
-              to="/dashboard"
+              to={isAuthenticated ? '/dashboard' : '/login'}
               style={{
                 display: 'flex', alignItems: 'center', gap: '5px',
                 padding: '5px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 500,
@@ -192,35 +203,60 @@ export function Board() {
               }}
             >
               <ArrowLeft size={12} />
-              Back
+              {isAuthenticated ? 'Back' : 'Home'}
             </Link>
 
-            <button
-              onClick={signOut}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '5px',
-                padding: '5px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 500,
-                color: 'rgba(255,255,255,0.55)',
-                backgroundColor: 'rgba(255,255,255,0.06)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                cursor: 'pointer', transition: 'all 200ms ease',
-              }}
-              onMouseEnter={(e) => {
-                const b = e.currentTarget as HTMLButtonElement;
-                b.style.backgroundColor = 'rgba(229,62,62,0.12)';
-                b.style.borderColor = 'rgba(229,62,62,0.3)';
-                b.style.color = '#ff6b6b';
-              }}
-              onMouseLeave={(e) => {
-                const b = e.currentTarget as HTMLButtonElement;
-                b.style.backgroundColor = 'rgba(255,255,255,0.06)';
-                b.style.borderColor = 'rgba(255,255,255,0.1)';
-                b.style.color = 'rgba(255,255,255,0.55)';
-              }}
-            >
-              <LogOut size={12} />
-              Logout
-            </button>
+            {isAuthenticated ? (
+              <button
+                onClick={signOut}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '5px',
+                  padding: '5px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 500,
+                  color: 'rgba(255,255,255,0.55)',
+                  backgroundColor: 'rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  cursor: 'pointer', transition: 'all 200ms ease',
+                }}
+                onMouseEnter={(e) => {
+                  const b = e.currentTarget as HTMLButtonElement;
+                  b.style.backgroundColor = 'rgba(229,62,62,0.12)';
+                  b.style.borderColor = 'rgba(229,62,62,0.3)';
+                  b.style.color = '#ff6b6b';
+                }}
+                onMouseLeave={(e) => {
+                  const b = e.currentTarget as HTMLButtonElement;
+                  b.style.backgroundColor = 'rgba(255,255,255,0.06)';
+                  b.style.borderColor = 'rgba(255,255,255,0.1)';
+                  b.style.color = 'rgba(255,255,255,0.55)';
+                }}
+              >
+                <LogOut size={12} />
+                Logout
+              </button>
+            ) : (
+              <Link
+                to="/login"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '5px',
+                  padding: '5px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 600,
+                  color: '#17c5c8',
+                  backgroundColor: 'rgba(23,197,200,0.1)',
+                  border: '1px solid rgba(23,197,200,0.3)',
+                  textDecoration: 'none', transition: 'all 200ms ease',
+                }}
+                onMouseEnter={(e) => {
+                  const a = e.currentTarget as HTMLAnchorElement;
+                  a.style.backgroundColor = 'rgba(23,197,200,0.2)';
+                }}
+                onMouseLeave={(e) => {
+                  const a = e.currentTarget as HTMLAnchorElement;
+                  a.style.backgroundColor = 'rgba(23,197,200,0.1)';
+                }}
+              >
+                <LogIn size={12} />
+                Sign in
+              </Link>
+            )}
           </div>
 
           {/* Center: Board title */}
@@ -256,7 +292,7 @@ export function Board() {
               )}
             </div>
 
-            <OnlineDropdown />
+            {isAuthenticated && <OnlineDropdown />}
           </div>
         </header>
 
