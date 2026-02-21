@@ -67,35 +67,92 @@ function OnlineDropdown() {
 
       {open && (
         <div style={{
-          position: 'absolute', top: 'calc(100% + 8px)', right: 0, minWidth: '200px',
-          backgroundColor: 'rgba(10,20,38,0.97)',
+          position: 'absolute', top: 'calc(100% + 8px)', right: 0, width: '260px',
+          backgroundColor: 'rgba(7,13,26,0.98)',
           border: '1px solid rgba(23,197,200,0.2)',
-          borderRadius: '12px', padding: '10px 12px',
+          borderRadius: '12px',
           boxShadow: '0 8px 32px rgba(0,0,0,0.5)', zIndex: 200,
+          overflow: 'hidden',
         }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
-            {users.map((user) => {
-              const isYou = user.userId === currentUserId;
-              return (
-                <div key={user.userId} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{
-                    width: 28, height: 28, borderRadius: '50%',
-                    backgroundColor: user.color, flexShrink: 0,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '10px', fontWeight: 700, color: '#fff',
-                  }}>
-                    {initials(user.userName)}
+          {/* Header */}
+          <div style={{
+            padding: '12px 14px',
+            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <span style={{ fontSize: '13px', fontWeight: 700, color: '#ffffff' }}>
+              Active Users
+            </span>
+            <button
+              onClick={() => setOpen(false)}
+              style={{
+                background: 'none', border: 'none', color: 'rgba(255,255,255,0.45)',
+                cursor: 'pointer', fontSize: '16px', padding: '0 2px', lineHeight: 1,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* User list */}
+          <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+            {users.length === 0 ? (
+              <div style={{ padding: '20px', textAlign: 'center', color: 'rgba(255,255,255,0.35)', fontSize: '13px' }}>
+                Only you are here
+              </div>
+            ) : (
+              users.map((user, idx) => {
+                const isYou = user.userId === currentUserId;
+                return (
+                  <div
+                    key={user.userId}
+                    style={{
+                      padding: '10px 14px',
+                      display: 'flex', alignItems: 'center', gap: '10px',
+                      borderBottom: idx < users.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                    }}
+                  >
+                    {/* Avatar */}
+                    <div style={{
+                      width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
+                      backgroundColor: user.color,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '13px', fontWeight: 700, color: '#fff',
+                    }}>
+                      {initials(user.userName)}
+                    </div>
+
+                    {/* Name + status */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px',
+                      }}>
+                        <span style={{
+                          fontSize: '13px', fontWeight: 600, color: '#ffffff',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                          {user.userName}
+                        </span>
+                        {isYou && (
+                          <span style={{
+                            fontSize: '9px', fontWeight: 700, color: '#17c5c8',
+                            backgroundColor: 'rgba(23,197,200,0.12)',
+                            border: '1px solid rgba(23,197,200,0.3)',
+                            borderRadius: '4px', padding: '1px 5px', flexShrink: 0,
+                          }}>
+                            YOU
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#28a745', flexShrink: 0 }} />
+                        <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>Active now</span>
+                      </div>
+                    </div>
                   </div>
-                  <span style={{
-                    fontSize: '12px', fontWeight: isYou ? 600 : 500,
-                    color: isYou ? '#ffffff' : 'rgba(255,255,255,0.75)',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>
-                    {isYou ? 'You' : user.userName}
-                  </span>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
       )}
