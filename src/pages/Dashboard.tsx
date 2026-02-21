@@ -201,10 +201,36 @@ export function Dashboard() {
 
   const handleCreate = async (title: string) => {
     setCreating(true);
+    const user = session!.user;
+
+    // Safety check: ensure public.users record exists (OAuth users may not have one)
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', user.id)
+      .single();
+
+    if (!existingUser) {
+      console.log('User record missing — creating for OAuth user…');
+      const { error: userErr } = await supabase.from('users').insert({
+        id: user.id,
+        email: user.email,
+        display_name:
+          user.user_metadata?.full_name ??
+          user.user_metadata?.name ??
+          user.email?.split('@')[0] ??
+          'User',
+      });
+      if (userErr) {
+        console.error('Failed to create user record:', userErr);
+        setCreating(false);
+        return;
+      }
+    }
 
     const { data: board, error } = await supabase
       .from('boards')
-      .insert({ title, user_id: session!.user.id, objects: [] })
+      .insert({ title, user_id: user.id, objects: [] })
       .select('id')
       .single();
 
@@ -216,7 +242,7 @@ export function Dashboard() {
 
     await supabase
       .from('board_members')
-      .insert({ board_id: board.id, user_id: session!.user.id });
+      .insert({ board_id: board.id, user_id: user.id });
 
     navigate(`/board/${board.id}`);
   };
