@@ -149,6 +149,13 @@ export function Whiteboard() {
   const justFinishedResizeRef = useRef(false);
   const [liveResizeDims, setLiveResizeDims] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [resizeCursor, setResizeCursor] = useState<string | null>(null);
+
+  // ── Rotation-handle state ─────────────────────────────────────────
+  const rotatingObjIdRef = useRef<string | null>(null);
+  const rotateStartRef   = useRef<{ startAngle: number; initRotation: number; cx: number; cy: number } | null>(null);
+  const liveRotationRef  = useRef<number | null>(null);
+  const justFinishedRotateRef = useRef(false);
+  const [liveRotation, setLiveRotation] = useState<number | null>(null);
   // Relative positions of objects contained inside a frame while it's dragged
   const frameDragContentsRef = useRef<{ id: string; relX: number; relY: number }[]>([]);
   // Timeout ref for delaying connection-point hide (gives user time to reach the dot)
@@ -540,6 +547,18 @@ export function Whiteboard() {
     const pos = stage.getRelativePointerPosition();
     if (!pos) return;
 
+    // ── Rotation handle drag ─────────────────────────────────────────
+    if (rotatingObjIdRef.current !== null && rotateStartRef.current !== null) {
+      const { startAngle, initRotation, cx, cy } = rotateStartRef.current;
+      const currentAngle = Math.atan2(pos.y - cy, pos.x - cx) * (180 / Math.PI);
+      let delta = currentAngle - startAngle;
+      let newRotation = initRotation + delta;
+      if (shiftHeldRef.current) newRotation = Math.round(newRotation / 15) * 15;
+      liveRotationRef.current = newRotation;
+      setLiveRotation(newRotation);
+      return;
+    }
+
     // ── Resize handle drag ───────────────────────────────────────────
     if (resizingObjIdRef.current !== null && resizeStartRef.current !== null) {
       const rs = resizeStartRef.current;
@@ -663,6 +682,23 @@ export function Whiteboard() {
   }, [activeTool, isDrawing]);
 
   const handleDrawMouseUp = useCallback(() => {
+    // ── Commit rotation ──────────────────────────────────────────────
+    if (rotatingObjIdRef.current !== null) {
+      const id = rotatingObjIdRef.current;
+      const rotation = liveRotationRef.current;
+      const initRotation = rotateStartRef.current?.initRotation ?? 0;
+      rotatingObjIdRef.current = null;
+      rotateStartRef.current = null;
+      liveRotationRef.current = null;
+      justFinishedRotateRef.current = true;
+      setLiveRotation(null);
+      setResizeCursor(null);
+      if (rotation !== null && Math.abs(rotation - initRotation) > 0.5) {
+        updateObject(id, { rotation });
+      }
+      return;
+    }
+
     // ── Commit resize ────────────────────────────────────────────────
     if (resizingObjIdRef.current !== null) {
       const id   = resizingObjIdRef.current;
@@ -995,6 +1031,10 @@ export function Whiteboard() {
     const effObj = (resizingObjIdRef.current === obj.id && liveResizeDims)
       ? { ...obj, ...liveResizeDims }
       : obj;
+    // Live rotation during handle drag; otherwise use stored value
+    const rot = (rotatingObjIdRef.current === obj.id && liveRotation !== null)
+      ? liveRotation
+      : (obj.rotation ?? 0);
 
     switch (obj.type) {
       case 'connector':
@@ -1041,21 +1081,27 @@ export function Whiteboard() {
             {...groupDragProps(obj)}
             {...connectorHoverProps(obj.id)}
           >
-            <Rect
-              width={effObj.width} height={effObj.height}
-              fill={obj.color || '#FFFF00'}
-              stroke={isSelected ? '#17a2b8' : 'rgba(0,0,0,0.15)'}
-              strokeWidth={isSelected ? 2 : 1}
-              shadowBlur={isSelected ? 8 : 3}
-              shadowColor={isSelected ? '#17a2b8' : 'black'}
-              shadowOpacity={isSelected ? 0.3 : 0.15}
-              shadowOffsetX={2} shadowOffsetY={2}
-            />
-            <Text
-              text={obj.text || ''} width={effObj.width} height={effObj.height}
-              padding={10} fontSize={14} fill="#1a1a1a" wrap="word"
-              opacity={isEditing ? 0 : 1}
-            />
+            <Group
+              x={effObj.width / 2} y={effObj.height / 2}
+              offsetX={effObj.width / 2} offsetY={effObj.height / 2}
+              rotation={rot}
+            >
+              <Rect
+                width={effObj.width} height={effObj.height}
+                fill={obj.color || '#FFFF00'}
+                stroke={isSelected ? '#17a2b8' : 'rgba(0,0,0,0.15)'}
+                strokeWidth={isSelected ? 2 : 1}
+                shadowBlur={isSelected ? 8 : 3}
+                shadowColor={isSelected ? '#17a2b8' : 'black'}
+                shadowOpacity={isSelected ? 0.3 : 0.15}
+                shadowOffsetX={2} shadowOffsetY={2}
+              />
+              <Text
+                text={obj.text || ''} width={effObj.width} height={effObj.height}
+                padding={10} fontSize={14} fill="#1a1a1a" wrap="word"
+                opacity={isEditing ? 0 : 1}
+              />
+            </Group>
           </Group>
         );
 
@@ -1070,24 +1116,31 @@ export function Whiteboard() {
             {...groupDragProps(obj)}
             {...connectorHoverProps(obj.id)}
           >
-            <Rect
-              width={effObj.width} height={effObj.height}
-              fill={obj.color || '#17a2b8'}
-              stroke={isSelected ? '#17a2b8' : (obj.strokeColor || 'rgba(0,0,0,0.2)')}
-              strokeWidth={isSelected ? 2.5 : (obj.strokeColor ? 2 : 1)}
-            />
-            {!isEditing && obj.text && (
-              <Text
-                text={obj.text} width={effObj.width} height={effObj.height}
-                align="center" verticalAlign="middle"
-                padding={10} fontSize={14} fill="#ffffff" wrap="word"
-                listening={false}
+            <Group
+              x={effObj.width / 2} y={effObj.height / 2}
+              offsetX={effObj.width / 2} offsetY={effObj.height / 2}
+              rotation={rot}
+            >
+              <Rect
+                width={effObj.width} height={effObj.height}
+                fill={obj.color || '#17a2b8'}
+                stroke={isSelected ? '#17a2b8' : (obj.strokeColor || 'rgba(0,0,0,0.2)')}
+                strokeWidth={isSelected ? 2.5 : (obj.strokeColor ? 2 : 1)}
               />
-            )}
+              {!isEditing && obj.text && (
+                <Text
+                  text={obj.text} width={effObj.width} height={effObj.height}
+                  align="center" verticalAlign="middle"
+                  padding={10} fontSize={14} fill="#ffffff" wrap="word"
+                  listening={false}
+                />
+              )}
+            </Group>
           </Group>
         );
 
       case 'circle':
+        // x/y is CENTER for circles; rotate around that center (x=0,y=0 in group coords)
         return (
           <Group
             key={obj.id} id={obj.id}
@@ -1098,40 +1151,51 @@ export function Whiteboard() {
             {...groupDragProps(obj)}
             {...connectorHoverProps(obj.id)}
           >
-            <Circle
-              radius={effObj.width / 2}
-              fill={obj.color || '#28a745'}
-              stroke={isSelected ? '#dc3545' : 'rgba(0,0,0,0.2)'}
-              strokeWidth={isSelected ? 2 : 1}
-            />
-            {!isEditing && obj.text && (
-              <Text
-                text={obj.text}
-                x={-effObj.width / 2} y={-effObj.width / 2}
-                width={effObj.width} height={effObj.width}
-                align="center" verticalAlign="middle"
-                padding={10} fontSize={14} fill="#ffffff" wrap="word"
-                listening={false}
+            <Group rotation={rot}>
+              <Circle
+                radius={effObj.width / 2}
+                fill={obj.color || '#28a745'}
+                stroke={isSelected ? '#dc3545' : 'rgba(0,0,0,0.2)'}
+                strokeWidth={isSelected ? 2 : 1}
               />
-            )}
+              {!isEditing && obj.text && (
+                <Text
+                  text={obj.text}
+                  x={-effObj.width / 2} y={-effObj.width / 2}
+                  width={effObj.width} height={effObj.width}
+                  align="center" verticalAlign="middle"
+                  padding={10} fontSize={14} fill="#ffffff" wrap="word"
+                  listening={false}
+                />
+              )}
+            </Group>
           </Group>
         );
 
       case 'text':
         return (
-          <Text
+          <Group
             key={obj.id} id={obj.id}
             x={effObj.x} y={effObj.y}
-            text={isEditing ? '' : (obj.text || 'Type something…')}
-            width={effObj.width}
-            fontSize={18} fill={obj.color || '#e2e8f0'} wrap="word"
-            opacity={!obj.text && !isEditing ? 0.4 : 1}
             draggable={objectsDraggable && !isEditing}
             onClick={(e) => { e.cancelBubble = true; selectObject(obj.id, shiftHeldRef.current); }}
             onDblClick={(e) => startEditing(obj, e)}
             {...groupDragProps(obj)}
             {...connectorHoverProps(obj.id)}
-          />
+          >
+            <Group
+              x={effObj.width / 2} y={effObj.height / 2}
+              offsetX={effObj.width / 2} offsetY={effObj.height / 2}
+              rotation={rot}
+            >
+              <Text
+                text={isEditing ? '' : (obj.text || 'Type something…')}
+                width={effObj.width}
+                fontSize={18} fill={obj.color || '#e2e8f0'} wrap="word"
+                opacity={!obj.text && !isEditing ? 0.4 : 1}
+              />
+            </Group>
+          </Group>
         );
 
       case 'line':
@@ -1190,6 +1254,12 @@ export function Whiteboard() {
           { type: 'w',  x: bx,          y: by + bh / 2  },
         ];
 
+    const ROT_OFFSET = 32 / zoom; // screen-constant 32px above top edge
+    const RH = 5 / zoom;          // rotation handle circle radius (5px screen)
+    const rhx = bx + bw / 2;
+    const rhy = by - ROT_OFFSET;
+    const supportsRotation = obj.type !== 'frame';
+
     return (
       <>
         {/* Dashed selection bounding box */}
@@ -1232,6 +1302,40 @@ export function Whiteboard() {
             }}
           />
         ))}
+        {/* Rotation handle — stem + circle above top-center */}
+        {supportsRotation && (
+          <>
+            <Line
+              points={[rhx, by, rhx, rhy + RH]}
+              stroke="#17a2b8" strokeWidth={1 / zoom}
+              dash={[3 / zoom, 2 / zoom]}
+              listening={false}
+            />
+            <Circle
+              x={rhx} y={rhy}
+              radius={RH}
+              fill="white" stroke="#17a2b8" strokeWidth={1.5 / zoom}
+              onMouseEnter={() => setResizeCursor('grab')}
+              onMouseLeave={() => { if (!rotatingObjIdRef.current) setResizeCursor(null); }}
+              onMouseDown={(e: Konva.KonvaEventObject<MouseEvent>) => {
+                e.cancelBubble = true;
+                const stage = stageRef.current;
+                if (!stage) return;
+                const pos = stage.getRelativePointerPosition();
+                if (!pos) return;
+                // Center of object (circles store x/y as center; others use top-left)
+                const cx = isCircle ? effObj.x : effObj.x + effObj.width / 2;
+                const cy = isCircle ? effObj.y : effObj.y + effObj.height / 2;
+                const startAngle = Math.atan2(pos.y - cy, pos.x - cx) * (180 / Math.PI);
+                rotatingObjIdRef.current = obj.id;
+                rotateStartRef.current = { startAngle, initRotation: obj.rotation ?? 0, cx, cy };
+                liveRotationRef.current = obj.rotation ?? 0;
+                setLiveRotation(obj.rotation ?? 0);
+                setResizeCursor('grabbing');
+              }}
+            />
+          </>
+        )}
       </>
     );
   };
@@ -1282,8 +1386,9 @@ export function Whiteboard() {
         onWheel={handleWheel}
         onDragEnd={stageDraggable ? handleDragEnd : undefined}
         onClick={() => {
-          // Suppress clear after a resize or marquee just finished
+          // Suppress clear after a resize, rotation, or marquee just finished
           if (justFinishedResizeRef.current) { justFinishedResizeRef.current = false; return; }
+          if (justFinishedRotateRef.current) { justFinishedRotateRef.current = false; return; }
           if (selBoxDraggedRef.current) { selBoxDraggedRef.current = false; return; }
           if (activeTool === 'select' || activeTool === 'connector') clearSelection();
         }}

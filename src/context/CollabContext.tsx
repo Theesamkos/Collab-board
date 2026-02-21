@@ -55,6 +55,9 @@ export function CollabProvider({
   const userId = session?.user?.id ?? '';
   // Immediate fallback from session metadata; overridden by DB name when fetched
   const [userName, setUserName] = useState(() => getDisplayName(session));
+  // Ref keeps the latest name without causing channel teardown on update
+  const userNameRef = useRef(userName);
+  useEffect(() => { userNameRef.current = userName; }, [userName]);
 
   // Fetch authoritative display_name from DB (covers email users with no metadata)
   useEffect(() => {
@@ -120,7 +123,7 @@ export function CollabProvider({
 
     channel.subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
-        await channel.track({ userName });
+        await channel.track({ userName: userNameRef.current });
       }
     });
 
@@ -128,7 +131,7 @@ export function CollabProvider({
       if (document.hidden) {
         channel.untrack();
       } else {
-        channel.track({ userName });
+        channel.track({ userName: userNameRef.current });
       }
     };
     document.addEventListener('visibilitychange', onVisibility);
@@ -140,7 +143,14 @@ export function CollabProvider({
       channel.unsubscribe();
       channelRef.current = null;
     };
-  }, [boardId, userId, userName]);
+  }, [boardId, userId]); // userName intentionally excluded — use ref to avoid channel teardown
+
+  // Re-track presence when DB name arrives without recreating the channel
+  useEffect(() => {
+    if (channelRef.current && userId) {
+      channelRef.current.track({ userName });
+    }
+  }, [userName, userId]);
 
   const broadcastCursor = (x: number, y: number) => {
     channelRef.current?.send({
