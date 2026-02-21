@@ -485,6 +485,19 @@ export function Dashboard() {
     setTimeout(() => setCopiedCodeId(null), 2000);
   };
 
+  // ── Leave board (member removes themselves) ───────────────────
+  const handleLeaveBoard = async (boardId: string, title: string) => {
+    if (!window.confirm(`Leave "${title}"?\n\nYou'll lose access to this board.`)) return;
+    const { error } = await supabase
+      .from('board_members')
+      .delete()
+      .eq('board_id', boardId)
+      .eq('user_id', session!.user.id);
+    if (error) { console.error('Leave board error:', error); alert('Failed to leave board.'); return; }
+    setBoards((prev) => prev.filter((b) => b.id !== boardId));
+    setShareMenuBoardId(null);
+  };
+
   // ── Delete board ──────────────────────────────────────────────
   const handleDeleteBoard = async (boardId: string, title: string) => {
     if (!window.confirm(`Delete "${title}"?\n\nThis removes it for all members and cannot be undone.`)) return;
@@ -841,7 +854,21 @@ export function Dashboard() {
                         color={copiedBoardId === board.id ? '#28a745' : undefined}
                       />
 
-                      {/* Toggle public (owner only) */}
+                      {/* Leave board (members only) */}
+                      {!board.isOwner && (
+                        <>
+                          <div style={{ height: '1px', backgroundColor: 'rgba(255,255,255,0.07)', margin: '4px 0' }} />
+                          <MenuBtn
+                            onClick={() => handleLeaveBoard(board.id, board.title)}
+                            icon={<LogOut size={13} />}
+                            label="Leave board"
+                            color="#ff6b6b"
+                            danger
+                          />
+                        </>
+                      )}
+
+                      {/* Toggle public + delete (owner only) */}
                       {board.isOwner && (
                         <>
                           <MenuBtn
