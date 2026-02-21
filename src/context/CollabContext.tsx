@@ -53,7 +53,21 @@ export function CollabProvider({
   const cursorTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const userId = session?.user?.id ?? '';
-  const userName = getDisplayName(session);
+  // Immediate fallback from session metadata; overridden by DB name when fetched
+  const [userName, setUserName] = useState(() => getDisplayName(session));
+
+  // Fetch authoritative display_name from DB (covers email users with no metadata)
+  useEffect(() => {
+    if (!userId) return;
+    supabase
+      .from('users')
+      .select('display_name')
+      .eq('id', userId)
+      .single()
+      .then(({ data }) => {
+        if (data?.display_name) setUserName(data.display_name);
+      });
+  }, [userId]);
 
   useEffect(() => {
     if (!boardId || !userId) return;

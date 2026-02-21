@@ -488,8 +488,22 @@ export function Dashboard() {
   // ── Delete board ──────────────────────────────────────────────
   const handleDeleteBoard = async (boardId: string, title: string) => {
     if (!window.confirm(`Delete "${title}"?\n\nThis removes it for all members and cannot be undone.`)) return;
-    const { error } = await supabase.from('boards').delete().eq('id', boardId);
-    if (error) { alert('Failed to delete. Only the board owner can delete it.'); return; }
+
+    // Remove all board_members first (avoids FK constraint; cascade also handles it in DB)
+    await supabase.from('board_members').delete().eq('board_id', boardId);
+
+    const { error } = await supabase
+      .from('boards')
+      .delete()
+      .eq('id', boardId)
+      .eq('user_id', session!.user.id); // extra guard: only owner can delete
+
+    if (error) {
+      console.error('Delete board error:', error);
+      alert('Failed to delete. Make sure you are the board owner.');
+      return;
+    }
+
     setBoards((prev) => prev.filter((b) => b.id !== boardId));
     setShareMenuBoardId(null);
   };
