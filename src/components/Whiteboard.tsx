@@ -394,7 +394,7 @@ export function Whiteboard() {
         wordBreak: 'break-word' as const,
         overflow: 'hidden',
         zIndex: 1000,
-        color: obj.color || '#e2e8f0',
+        color: obj.color || '#1a1a1a',
       };
     }
 
@@ -534,7 +534,7 @@ export function Whiteboard() {
       setLiveRect(null);
     } else if (activeTool === 'text') {
       const newId = crypto.randomUUID();
-      addObject({ id: newId, type: 'text', x: pos.x, y: pos.y, width: 200, height: 40, text: '', color: '#e2e8f0' });
+      addObject({ id: newId, type: 'text', x: pos.x, y: pos.y, width: 200, height: 40, text: '', color: '#1a1a1a' });
       pendingEditIdRef.current = newId;
       setActiveTool('select');
     }
@@ -1191,7 +1191,7 @@ export function Whiteboard() {
               <Text
                 text={isEditing ? '' : (obj.text || 'Type something…')}
                 width={effObj.width}
-                fontSize={18} fill={obj.color || '#e2e8f0'} wrap="word"
+                fontSize={18} fill={obj.color || '#1a1a1a'} wrap="word"
                 opacity={!obj.text && !isEditing ? 0.4 : 1}
               />
             </Group>
