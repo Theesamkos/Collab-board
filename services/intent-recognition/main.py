@@ -1,7 +1,9 @@
 """
-CollabBoard AI Service v3
+CollabBoard AI Service v4
 --------------------------
 Single-layer AI endpoint powered by claude-sonnet-4-6 via LangChain.
+
+# Version 4.0.0 - Added summarizeBoard feature
 
 v4 adds: summarizeBoard (AI-generated board analysis with key points, risks, action items)
 Full board state is accepted and injected into the system prompt so Claude
