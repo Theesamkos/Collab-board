@@ -1,14 +1,23 @@
 /**
- * useAIAgent v3 — single-layer AI routing hook
+ * useAIAgent v4 — single-layer AI routing hook
  *
  * Sends every command to ONE endpoint with board state and executes
  * the returned tool calls against the Zustand board store.
  *
- * v3 adds: updateObject, deleteObjects, alignObjects,
- *          distributeObjects, createTemplate
+ * v4 adds: summarizeBoard — intercepts the tool call and surfaces
+ *          structured summary data (title, key_points, risks, action_items)
+ *          as React state for the UI to render.
  */
 
 import { useState, useCallback } from 'react';
+
+// ── Summary data type ─────────────────────────────────────────────────────────
+export interface SummaryData {
+  title: string;
+  key_points: string[];
+  risks: string[];
+  action_items: string[];
+}
 import { v4 as uuidv4 } from 'uuid';
 import { useBoardStore } from '../store/boardStore';
 
@@ -352,6 +361,9 @@ function executeToolCall(call: ToolCall): void {
 export function useAIAgent() {
   const [phase, setPhase]           = useState<AIPhase>('idle');
   const [errorMessage, setErrorMsg] = useState('');
+  const [summary, setSummary]       = useState<SummaryData | null>(null);
+
+  const clearSummary = useCallback(() => setSummary(null), []);
 
   const { boardId, objects, selectedObjectIds } = useBoardStore();
 
@@ -406,15 +418,31 @@ export function useAIAgent() {
           return;
         }
 
-        setPhase('creating');
-        await new Promise<void>((res) => setTimeout(res, 60));
+        // ── Intercept summarizeBoard before general execution ──────────────
+        const summaryCall = toolCalls.find((tc) => tc.name === 'summarizeBoard');
+        const otherCalls  = toolCalls.filter((tc) => tc.name !== 'summarizeBoard');
 
-        console.log('[useAIAgent] tool calls to execute:', toolCalls);
-        for (const call of toolCalls) {
-          try {
-            executeToolCall(call);
-          } catch (err) {
-            console.error(`[useAIAgent] tool "${call.name}" threw:`, err);
+        if (summaryCall) {
+          const args = summaryCall.args as Partial<SummaryData>;
+          setSummary({
+            title:        typeof args.title        === 'string'   ? args.title        : 'Board Summary',
+            key_points:   Array.isArray(args.key_points)           ? args.key_points   : [],
+            risks:        Array.isArray(args.risks)                ? args.risks        : [],
+            action_items: Array.isArray(args.action_items)         ? args.action_items : [],
+          });
+        }
+
+        if (otherCalls.length > 0) {
+          setPhase('creating');
+          await new Promise<void>((res) => setTimeout(res, 60));
+
+          console.log('[useAIAgent] tool calls to execute:', otherCalls);
+          for (const call of otherCalls) {
+            try {
+              executeToolCall(call);
+            } catch (err) {
+              console.error(`[useAIAgent] tool "${call.name}" threw:`, err);
+            }
           }
         }
 
@@ -431,5 +459,5 @@ export function useAIAgent() {
     [boardId, objects, selectedObjectIds],
   );
 
-  return { processCommand, phase, errorMessage };
+  return { processCommand, phase, errorMessage, summary, clearSummary };
 }
