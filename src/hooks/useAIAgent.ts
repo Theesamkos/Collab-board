@@ -4,22 +4,22 @@
  * Sends every command to ONE endpoint with board state and executes
  * the returned tool calls against the Zustand board store.
  *
- * v4 adds: summarizeBoard — intercepts the tool call and surfaces
- *          structured summary data (title, key_points, risks, action_items)
- *          as React state for the UI to render.
+ * v4 adds: summarizeBoard — intercepts the tool call and renders a
+ *          structured summary frame + sticky notes directly on the board,
+ *          synced to all collaborators via Supabase.
  */
 
 import { useState, useCallback } from 'react';
+import { v4 as uuidv4 } from 'uuid';
+import { useBoardStore } from '../store/boardStore';
 
-// ── Summary data type ─────────────────────────────────────────────────────────
-export interface SummaryData {
+// ── Summary data type (internal) ──────────────────────────────────────────────
+interface SummaryData {
   title: string;
   key_points: string[];
   risks: string[];
   action_items: string[];
 }
-import { v4 as uuidv4 } from 'uuid';
-import { useBoardStore } from '../store/boardStore';
 
 // ── Phase type ────────────────────────────────────────────────────────────────
 export type AIPhase = 'idle' | 'thinking' | 'creating' | 'done' | 'error';
@@ -108,6 +108,86 @@ function createTemplate(templateType: string, startX: number, startY: number): v
     default:
       console.warn('[useAIAgent] Unknown template type:', templateType);
   }
+}
+
+// ── Summary board renderer ────────────────────────────────────────────────────
+// Creates a labelled frame + colour-coded sticky notes on the board.
+// All objects flow through addObject → scheduleSyncDebounced → Supabase,
+// so every collaborator sees them automatically.
+function renderSummaryOnBoard(summary: SummaryData): void {
+  const { addObject, objects } = useBoardStore.getState();
+
+  // Place frame to the right of the rightmost existing object (or default)
+  const maxX = objects.length > 0
+    ? Math.max(...objects.map((o) => o.x + (o.width ?? 0)))
+    : 0;
+  const frameX = Math.max(maxX + 60, 100);
+  const frameY = 100;
+
+  // Layout constants
+  const PAD     = 20;
+  const TITLE_H = 44;   // height reserved for the frame label
+  const NOTE_W  = 250;
+  const NOTE_H  = 140;
+  const COL_GAP = 16;
+  const ROW_GAP = 10;
+  const NOTE_STEP = NOTE_H + ROW_GAP;
+
+  const col2Count = summary.risks.length + summary.action_items.length;
+  const maxRows   = Math.max(summary.key_points.length, col2Count, 1);
+
+  const FRAME_W = PAD + NOTE_W + COL_GAP + NOTE_W + PAD;  // 576px
+  const FRAME_H = PAD + TITLE_H + PAD + maxRows * NOTE_STEP - ROW_GAP + PAD;
+
+  // ── Frame (inserted first so it renders behind the notes) ──
+  addObject({
+    id: uuidv4(),
+    type: 'frame',
+    x: frameX,
+    y: frameY,
+    width: FRAME_W,
+    height: FRAME_H,
+    text: summary.title,
+    color: 'rgba(255,255,255,0.02)',
+    strokeColor: '#94a3b8',
+  });
+
+  // ── Note positions ──
+  const notesY = frameY + PAD + TITLE_H + PAD;
+  const col1X  = frameX + PAD;
+  const col2X  = frameX + PAD + NOTE_W + COL_GAP;
+
+  // Column 1 — Key Points (blue)
+  summary.key_points.forEach((point, i) => {
+    addObject({
+      id: uuidv4(), type: 'sticky-note',
+      x: col1X, y: notesY + i * NOTE_STEP,
+      width: NOTE_W, height: NOTE_H,
+      text: point,
+      color: '#3B82F6',
+    });
+  });
+
+  // Column 2 — Risks (red) stacked above Action Items (green)
+  summary.risks.forEach((risk, i) => {
+    addObject({
+      id: uuidv4(), type: 'sticky-note',
+      x: col2X, y: notesY + i * NOTE_STEP,
+      width: NOTE_W, height: NOTE_H,
+      text: risk,
+      color: '#EF4444',
+    });
+  });
+
+  summary.action_items.forEach((item, i) => {
+    addObject({
+      id: uuidv4(), type: 'sticky-note',
+      x: col2X, y: notesY + (summary.risks.length + i) * NOTE_STEP,
+      width: NOTE_W, height: NOTE_H,
+      text: item,
+      color: '#10B981',
+    });
+  });
 }
 
 // ── Tool executor ─────────────────────────────────────────────────────────────
@@ -361,9 +441,6 @@ function executeToolCall(call: ToolCall): void {
 export function useAIAgent() {
   const [phase, setPhase]           = useState<AIPhase>('idle');
   const [errorMessage, setErrorMsg] = useState('');
-  const [summary, setSummary]       = useState<SummaryData | null>(null);
-
-  const clearSummary = useCallback(() => setSummary(null), []);
 
   const { boardId, objects, selectedObjectIds } = useBoardStore();
 
@@ -424,11 +501,11 @@ export function useAIAgent() {
 
         if (summaryCall) {
           const args = summaryCall.args as Partial<SummaryData>;
-          setSummary({
-            title:        typeof args.title        === 'string'   ? args.title        : 'Board Summary',
-            key_points:   Array.isArray(args.key_points)           ? args.key_points   : [],
-            risks:        Array.isArray(args.risks)                ? args.risks        : [],
-            action_items: Array.isArray(args.action_items)         ? args.action_items : [],
+          renderSummaryOnBoard({
+            title:        typeof args.title        === 'string' ? args.title        : 'Board Summary',
+            key_points:   Array.isArray(args.key_points)        ? args.key_points   : [],
+            risks:        Array.isArray(args.risks)             ? args.risks        : [],
+            action_items: Array.isArray(args.action_items)      ? args.action_items : [],
           });
         }
 
@@ -459,5 +536,5 @@ export function useAIAgent() {
     [boardId, objects, selectedObjectIds],
   );
 
-  return { processCommand, phase, errorMessage, summary, clearSummary };
+  return { processCommand, phase, errorMessage };
 }
