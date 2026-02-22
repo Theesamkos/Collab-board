@@ -1,9 +1,11 @@
 /**
- * useAIAgent v4 — single-layer AI routing hook
+ * useAIAgent v5 — single-layer AI routing hook
  *
  * Sends every command to ONE endpoint with board state and executes
  * the returned tool calls against the Zustand board store.
  *
+ * v5 adds: applyTheme — intercepts the tool call and applies color
+ *          updates to every board object, synced via Supabase.
  * v4 adds: summarizeBoard — intercepts the tool call and renders a
  *          structured summary frame + sticky notes directly on the board,
  *          synced to all collaborators via Supabase.
@@ -13,12 +15,17 @@ import { useState, useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useBoardStore } from '../store/boardStore';
 
-// ── Summary data type (internal) ──────────────────────────────────────────────
+// ── Internal data types ───────────────────────────────────────────────────────
 interface SummaryData {
   title: string;
   key_points: string[];
   risks: string[];
   action_items: string[];
+}
+
+interface ThemeUpdate {
+  id: string;
+  color: string;
 }
 
 // ── Phase type ────────────────────────────────────────────────────────────────
@@ -188,6 +195,17 @@ function renderSummaryOnBoard(summary: SummaryData): void {
       color: '#10B981',
     });
   });
+}
+
+// ── Theme applier ─────────────────────────────────────────────────────────────
+// Applies color updates returned by applyTheme to existing board objects.
+// Each update flows through updateObject → scheduleSyncDebounced → Supabase,
+// so all collaborators see the theme change in real time.
+function applyThemeToBoard(updates: ThemeUpdate[]): void {
+  const { updateObject } = useBoardStore.getState();
+  for (const { id, color } of updates) {
+    if (id && color) updateObject(id, { color });
+  }
 }
 
 // ── Tool executor ─────────────────────────────────────────────────────────────
@@ -501,9 +519,12 @@ export function useAIAgent() {
           return;
         }
 
-        // ── Intercept summarizeBoard before general execution ──────────────
+        // ── Intercept special tools before general execution ───────────────
         const summaryCall = toolCalls.find((tc) => tc.name === 'summarizeBoard');
-        const otherCalls  = toolCalls.filter((tc) => tc.name !== 'summarizeBoard');
+        const themeCall   = toolCalls.find((tc) => tc.name === 'applyTheme');
+        const otherCalls  = toolCalls.filter(
+          (tc) => tc.name !== 'summarizeBoard' && tc.name !== 'applyTheme',
+        );
 
         if (summaryCall) {
           const args = summaryCall.args as Partial<SummaryData>;
@@ -534,6 +555,16 @@ export function useAIAgent() {
             s.setZoom(newZoom);
             s.setPan(newPanX, newPanY);
           }, 200);
+        }
+
+        if (themeCall) {
+          const updates = Array.isArray(themeCall.args.updates)
+            ? (themeCall.args.updates as ThemeUpdate[])
+            : [];
+          applyThemeToBoard(updates);
+          console.log(
+            `[useAIAgent] applied "${themeCall.args.theme}" theme to ${updates.length} objects`,
+          );
         }
 
         if (otherCalls.length > 0) {
