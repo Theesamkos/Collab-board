@@ -490,6 +490,12 @@ export function useAIAgent() {
         );
 
         if (toolCalls.length === 0) {
+          // If the backend returned a message instead of a tool call (e.g. running
+          // an older version without summarizeBoard), surface it as an error hint.
+          const serverMsg: string = typeof data.message === 'string' ? data.message : '';
+          if (serverMsg) {
+            console.warn('[useAIAgent] backend returned message (no tool call):', serverMsg);
+          }
           setPhase('done');
           setTimeout(() => setPhase('idle'), 2_200);
           return;
@@ -507,6 +513,27 @@ export function useAIAgent() {
             risks:        Array.isArray(args.risks)             ? args.risks        : [],
             action_items: Array.isArray(args.action_items)      ? args.action_items : [],
           });
+          // After a brief settle, fit the view so the new summary frame is visible
+          setTimeout(() => {
+            const s = useBoardStore.getState();
+            const objs = s.objects;
+            if (objs.length === 0) return;
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const o of objs) {
+              minX = Math.min(minX, o.x); minY = Math.min(minY, o.y);
+              maxX = Math.max(maxX, o.x + (o.width ?? 0));
+              maxY = Math.max(maxY, o.y + (o.height ?? 0));
+            }
+            const contentW = maxX - minX + 80;
+            const contentH = maxY - minY + 80;
+            const viewW = window.innerWidth  - 40;
+            const viewH = window.innerHeight - 150;
+            const newZoom = Math.max(0.25, Math.min(2, Math.min(viewW / contentW, viewH / contentH)));
+            const newPanX = viewW / 2 - (minX + contentW / 2 - 40) * newZoom;
+            const newPanY = viewH / 2 - (minY + contentH / 2 - 40) * newZoom;
+            s.setZoom(newZoom);
+            s.setPan(newPanX, newPanY);
+          }, 200);
         }
 
         if (otherCalls.length > 0) {
