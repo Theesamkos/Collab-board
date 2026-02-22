@@ -198,14 +198,18 @@ function renderSummaryOnBoard(summary: SummaryData): void {
 }
 
 // ── Theme applier ─────────────────────────────────────────────────────────────
-// Applies color updates returned by applyTheme to existing board objects.
+// Applies color updates returned by applyTheme with a staggered cascade effect.
+// Each object updates 50ms after the previous, creating a wave animation.
 // Each update flows through updateObject → scheduleSyncDebounced → Supabase,
 // so all collaborators see the theme change in real time.
 function applyThemeToBoard(updates: ThemeUpdate[]): void {
   const { updateObject } = useBoardStore.getState();
-  for (const { id, color } of updates) {
-    if (id && color) updateObject(id, { color });
-  }
+  updates.forEach(({ id, color }, index) => {
+    if (!id || !color) return;
+    setTimeout(() => {
+      updateObject(id, { color });
+    }, index * 50);
+  });
 }
 
 // ── Tool executor ─────────────────────────────────────────────────────────────

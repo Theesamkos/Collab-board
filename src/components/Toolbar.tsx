@@ -4,12 +4,13 @@ import {
   Save, Check, Loader2,
   Pencil, Hand, MousePointer, Trash2,
   ZoomIn, ZoomOut, RotateCcw, Share2,
-  Undo2, Redo2, Frame, Layers, Type,
+  Undo2, Redo2, Frame, Layers, Type, Palette,
 } from 'lucide-react';
 import { useBoardStore, ActiveTool } from '../store/boardStore';
 import { useUndoRedo } from '../hooks/useUndoRedo';
 import { v4 as uuidv4 } from 'uuid';
 import { AICommandInput } from './AICommandInput';
+import { ThemeModal } from './ThemeModal';
 import { Dock, DockIcon } from './ui/dock';
 import { cn } from '@/lib/utils';
 
@@ -121,6 +122,7 @@ export function Toolbar() {
   } = useBoardStore();
 
   const { undo, redo, canUndo, canRedo } = useUndoRedo();
+  const [showThemeModal, setShowThemeModal] = useState(false);
 
   const pct = Math.round(zoom * 100);
   const has = selectedObjectIds.length > 0;
@@ -239,9 +241,14 @@ export function Toolbar() {
           <ToolDockIcon icon={<RotateCcw size={17} />} label="Reset view"
             onClick={() => { setZoom(1); setPan(0, 0); }} />
 
+          <ToolDockIcon icon={<Palette size={17} />} label="Apply theme"
+            color="#a78bfa" onClick={() => setShowThemeModal(true)} />
+
           <SaveDockIcon />
         </Dock>
       </div>
+
+      {showThemeModal && <ThemeModal onClose={() => setShowThemeModal(false)} />}
     </div>
   );
 }
